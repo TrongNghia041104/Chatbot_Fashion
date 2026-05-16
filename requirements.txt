@@ -1,0 +1,25 @@
+# ═══════════════════════════════════════════════════════════════════
+# Fashion RAG - Dependencies
+# ═══════════════════════════════════════════════════════════════════
+
+# LangChain ecosystem
+langchain-huggingface
+langchain-qdrant
+langchain-core
+langchain-ollama
+langchain-community
+langchain-classic
+
+# Vector Database
+qdrant-client
+
+# LLM (local Ollama)
+ollama
+
+# NLP tiếng Việt
+underthesea
+
+# Utilities
+tqdm
+python-dotenv
+redis

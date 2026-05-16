@@ -1,0 +1,11 @@
+langchain-huggingface
+langchain-qdrant
+qdrant-client
+langchain-core
+langchain-ollama
+langchain-community
+underthesea
+tqdm
+redis
+langchain-google-genai  # Nếu bạn dùng Gemini như code trước
+python-dotenv
