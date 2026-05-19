@@ -4,7 +4,7 @@ Chạy với: /venv/main/bin/python
 """
 import json, uuid, os, time, base64
 
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_ollama import OllamaEmbeddings
 from langchain_core.embeddings import Embeddings
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
@@ -20,24 +20,28 @@ from langchain_core.prompts import PromptTemplate, ChatPromptTemplate, MessagesP
 from langchain_core.callbacks import BaseCallbackHandler
 import ollama
 
-# ── EMBEDDING ─────────────────────────────────────────────────────────────────
+# ── EMBEDDING (qua Ollama SSH Tunnel → Vast.ai GPU) ──────────────────────────
 class BGEM3Embeddings(Embeddings):
-    def __init__(self, model_name="BAAI/bge-m3"):
-        self.hf_embeddings = HuggingFaceEmbeddings(
-            model_name=model_name,
-            model_kwargs={"device": "cpu"},
+    """
+    Wrapper cho BGE-M3 chạy qua Ollama (localhost:11434 via SSH tunnel lên Vast.ai).
+    Vector 1024 chiều — khớp hoàn toàn với Qdrant collection đã tạo.
+    """
+    def __init__(self, model_name="bge-m3"):
+        self.ollama_embeddings = OllamaEmbeddings(
+            model=model_name,
+            base_url="http://localhost:11434",  # SSH tunnel → Vast.ai
         )
     def embed_documents(self, texts):
-        return self.hf_embeddings.embed_documents(texts)
+        return self.ollama_embeddings.embed_documents(texts)
     def embed_query(self, text):
-        return self.hf_embeddings.embed_query(text)
+        return self.ollama_embeddings.embed_query(text)
 
 # ── KHỞI TẠO EMBEDDING & QDRANT (local) ──────────────────────────────────────
 print("[INFO] Đang load Embedding model BGE-M3...")
 custom_embeddings = BGEM3Embeddings()
 
-print("[INFO] Đang kết nối Qdrant local...")
-client = QdrantClient(path="./qdrant_data")
+print("[INFO] Đang kết nối Qdrant Docker (localhost:6333)...")
+client = QdrantClient(url="http://localhost:6333")
 
 vector_db = QdrantVectorStore(
     client=client,
@@ -56,8 +60,8 @@ def load_layer_b(file_path: str) -> list:
         return json.load(f)
 
 _base_dir = os.path.dirname(os.path.abspath(__file__))
-layer_b_female = load_layer_b(os.path.join(_base_dir, "Layer_B_Female_Knowledge.json"))
-layer_b_male   = load_layer_b(os.path.join(_base_dir, "Layer_B_Male_Knowledge.json"))
+layer_b_female = load_layer_b(os.path.join(_base_dir, "Fashion_Stylists", "Layer_B_Female_Knowledge.json"))
+layer_b_male   = load_layer_b(os.path.join(_base_dir, "Fashion_Stylists", "Layer_B_Male_Knowledge.json"))
 print(f"[OK] Layer B: {len(layer_b_female)} rules Nữ | {len(layer_b_male)} rules Nam")
 
 def index_layer_b(data: list, collection_name: str):

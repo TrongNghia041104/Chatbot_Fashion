@@ -238,7 +238,7 @@ async def chat(
         if intent == "outfit":
             try:
                 outfit_context = await asyncio.to_thread(
-                    _build_outfit_context, final_query, gender, profile, _vector_db
+                    _build_outfit_context, final_query, gender, profile
                 )
             except Exception as e:
                 outfit_context = None
