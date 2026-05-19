@@ -219,25 +219,24 @@ print("[OK] Vision functions sẵn sàng!")
 # ── LLM ───────────────────────────────────────────────────────────────────────
 print("[INFO] Đang khởi tạo LLM Qwen local...")
 llm = ChatOllama(model="qwen3:4b-instruct", temperature=0.4,
-                 timeout=120, num_predict=350, num_ctx=8192)
+                 timeout=120, num_predict=1024, num_ctx=8192)
 print("[OK] LLM sẵn sàng!")
 
 # ── PROMPTS ───────────────────────────────────────────────────────────────────
-system_prompt = """Bạn là chuyên viên tư vấn thời trang cao cấp của shop.
+system_prompt = """Bạn là một chuyên viên tư vấn thời trang cao cấp, có gu thẩm mỹ tinh tế và giọng văn vô cùng thân thiện, thanh lịch.
 
 QUY TẮC TỐI CAO (CHỐNG BỊA ĐẶT - ANTI-HALLUCINATION):
-1. CHỈ SỬ DỤNG thông tin có trong phần "DỮ LIỆU SẢN PHẨM" bên dưới để trả lời.
-2. TUYỆT ĐỐI KHÔNG tự bịa ra tên sản phẩm, không bịa ID, giá tiền, màu sắc hay chất liệu.
-3. NẾU KHÔNG TÌM THẤY SẢN PHẨM KHỚP NHU CẦU: Khẳng định ngay là shop chưa có mẫu này.
+1. BẠN PHẢI TÌM TRONG phần "DỮ LIỆU SẢN PHẨM" bên dưới để trả lời khách.
+2. TUYỆT ĐỐI KHÔNG bịa ra tên, giá tiền, hay đặc điểm sản phẩm nếu không có trong dữ liệu.
+3. NẾU KHÔNG CÓ DỮ LIỆU KHỚP: Xin lỗi duyên dáng là shop tạm hết mẫu này và chủ động hỏi khách có muốn đổi sang phong cách khác không.
 
-QUY TẮC TRÌNH BÀY:
-4. BẮT BUỘC trích xuất chính xác 100%.
-5. Khuôn mẫu:
-   - **[TÊN_SP]** (Mã SP: [MÃ_SP])
-   - Giá: [GIÁ_TIỀN] VNĐ
-   - Đặc điểm: [1 câu hoàn chỉnh]
-   - [1-2 câu tư vấn thân thiện]
-6. GIỚI HẠN: không vượt quá 200 từ.
+CÁCH TRÌNH BÀY (Mượt mà, tự nhiên, có xAI):
+- Mở đầu bằng một câu chào hoặc nhận xét nhẹ nhàng về gu của khách.
+- Khi giới thiệu sản phẩm, hãy lồng ghép thông tin khéo léo thành đoạn văn thay vì gạch đầu dòng khô khan.
+- Bắt buộc in đậm **Tên Sản Phẩm** và kèm (Mã SP: [MÃ_SP]) - [Giá] VNĐ.
+- xAI (GIẢI THÍCH LÝ DO - BẮT BUỘC): Sau mỗi sản phẩm, THÊM 1 câu giải thích ngắn tại sao sản phẩm này phù hợp với yêu cầu của khách (dựa vào màu sắc, chất liệu, dịp mặc, hoặc vóc dáng).
+- Nếu có ẢNH trong dữ liệu: đính kèm ảnh đầu tiên theo format ![ảnh](URL_ẢNH) để khách xem trực quan.
+- Trả lời súc tích, không vượt quá 300 từ.
 
 DỮ LIỆU SẢN PHẨM:
 {context}"""
@@ -249,21 +248,37 @@ QA_PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 contextualize_q_prompt = ChatPromptTemplate.from_messages([
-    ("system", """BẠN LÀ MỘT CÔNG CỤ VIẾT LẠI CÂU TRUY VẤN, BẠN KHÔNG PHẢI LÀ CHATBOT.
-Nhiệm vụ: Đọc "Lịch sử trò chuyện" và "Câu hỏi mới", VIẾT thành MỘT CÂU TRUY VẤN HOÀN CHỈNH.
-QUY TẮC: CHỈ IN RA CÂU TRUY VẤN. Nếu không chắc thì TRẢ VỀ CÂU GỐC."""),
+    ("system", """Nhiệm vụ của bạn là NGƯỜI VIẾT LẠI CÂU HỎI.
+Dựa vào lịch sử trò chuyện, hãy làm rõ nghĩa của câu hỏi mới nhất để nó có thể đứng độc lập mà ai đọc cũng hiểu được.
+
+QUY TẮC SỐNG CÒN:
+- TUYỆT ĐỐI KHÔNG TRẢ LỜI CÂU HỎI CỦA KHÁCH.
+- CHỈ IN RA DUY NHẤT CÂU HỎI ĐÃ ĐƯỢC VIẾT LẠI. Không giải thích, không dạ thưa.
+- Nếu câu hỏi đã quá rõ ràng rồi, hãy in lại y nguyên.
+
+VÍ DỤ: Khách: "Có màu khác không?" -> CHỈ IN RA: "Áo thun đỏ ở trên có màu khác không?"""),
     MessagesPlaceholder("chat_history"),
     ("human", "{input}"),
 ])
 
-doc_prompt = PromptTemplate.from_template("\n[MÃ_SP: {product_id}]\nTHÔNG TIN CHI TIẾT: {page_content}\n")
+doc_prompt = PromptTemplate.from_template(
+    "\n[MÃ_SP: {product_id}]"
+    "\nẢNH: {images}"
+    "\nTHÔNG TIN CHI TIẾT: {page_content}\n"
+)
 
-OUTFIT_SYSTEM_PROMPT = """Bạn là chuyên viên tư vấn thời trang cao cấp của shop.
-NHIỆM VỤ: Dựa vào "CÔNG THỨC PHỐI ĐỒ" và "SẢN PHẨM GỢI Ý" bên dưới, tư vấn cho khách một bộ outfit hoàn chỉnh.
+OUTFIT_SYSTEM_PROMPT = """Bạn là một chuyên gia tạo dáng (Personal Stylist) cực kỳ chuyên nghiệp và tâm lý.
+
+NHIỆM VỤ: Dựa vào "CÔNG THỨC PHỐI ĐỒ" và "SẢN PHẨM GỢI Ý" bên dưới, hãy "hô biến" một bộ outfit hoàn hảo cho khách hàng.
+
 QUY TẮC:
-1. CHỈ giới thiệu sản phẩm có trong phần "SẢN PHẨM GỢI Ý". KHÔNG tự bịa.
-2. Với mỗi món đồ: • **[TÊN SP]** (Mã SP: [MÃ_SP]) – [GIÁ] VNĐ → [1 câu mô tả]
-3. Kết thúc bằng 1-2 câu tổng kết phong cách. Giới hạn 250 từ.
+1. Khéo léo xâu chuỗi các món đồ thành một bức tranh tổng thể.
+2. TUYỆT ĐỐI không giới thiệu đồ ngoài danh sách "SẢN PHẨM GỢI Ý". Không tự bịa thêm đồ.
+3. Nhớ in đậm **Tên Sản Phẩm**, kèm (Mã SP: [MÃ_SP]) và [Giá] VNĐ ở mỗi món.
+4. xAI - TÍNH MINH BẠCH (BẮT BUỘC): ở mỗi món đồ, BẠN PHẢI GIẢI THÍCH TẠI SAO món này phù hợp (dựa vào vóc dáng, tone da, hoặc lý do có trong công thức).
+5. Nếu có ẢNH trong dữ liệu sản phẩm: đính kèm ![ảnh](URL_ẢNH) để khách xem trực quan.
+6. Giọng điệu nịnh khách, sang trọng nhưng gần gũi. Lồng ghép thành các đoạn văn mượt mà, tránh dùng gạch đầu dòng liệt kê như hóa đơn.
+7. Kết thúc bằng 1 câu chốt sale/hỏi han thân thiện. Giới hạn 350 từ.
 
 {outfit_context}"""
 
@@ -276,15 +291,62 @@ outfit_prompt = ChatPromptTemplate.from_messages([
 # ── REDIS HISTORY ─────────────────────────────────────────────────────────────
 REDIS_URL = "redis://localhost:6379"
 
-def get_message_history(session_id: str):
-    history = RedisChatMessageHistory(session_id, url=REDIS_URL)
-    current = history.messages
-    if len(current) > 6:
-        kept = current[-6:]
-        history.clear()
-        history.add_messages(kept)
-    return history
+# def get_message_history(session_id: str):
+#     history = RedisChatMessageHistory(session_id, url=REDIS_URL)
+#     current = history.messages
+#     if len(current) > 6:
+#         kept = current[-6:]
+#         history.clear()
+#         history.add_messages(kept)
+#     return history
+# Cell 21 — thay get_message_history() bằng version có summarization
 
+SUMMARIZE_PROMPT = """Tóm tắt cuộc hội thoại mua sắm thời trang sau thành 3-5 câu ngắn.
+Giữ lại: sản phẩm đã hỏi, phong cách khách thích, thông tin vóc dáng/tone da (nếu có).
+Bỏ qua: lời chào, câu xã giao.
+Chỉ trả về đoạn tóm tắt, không thêm gì khác.
+
+Hội thoại:
+{history_text}"""
+
+def summarize_history(messages: list) -> str:
+    """Dùng LLM tóm tắt lịch sử hội thoại cũ."""
+    history_text = "\n".join([
+        f"{'Khách' if m.type == 'human' else 'Bot'}: {m.content[:300]}"
+        for m in messages
+    ])
+    resp = ollama.chat(
+        model   = "qwen3:4b-instruct",
+        messages= [{"role": "user",
+                    "content": SUMMARIZE_PROMPT.format(history_text=history_text)}],
+        options = {"temperature": 0, "num_predict": 150}
+    )
+    return resp["message"]["content"].strip()
+
+def get_message_history(session_id: str):
+    from langchain_core.messages import SystemMessage
+
+    history  = RedisChatMessageHistory(session_id, url=REDIS_URL)
+    messages = history.messages
+
+    # Dưới 8 message → giữ nguyên, chưa cần tóm tắt
+    if len(messages) <= 8:
+        return history
+
+    # Trên 8 message → tóm tắt phần cũ, giữ 4 message gần nhất
+    old_messages    = messages[:-4]
+    recent_messages = messages[-4:]
+
+    summary_text = summarize_history(old_messages)
+
+    # Rebuild history: [summary message] + [4 recent messages]
+    history.clear()
+    history.add_message(SystemMessage(
+        content=f"[TÓM TẮT HỘI THOẠI TRƯỚC]: {summary_text}"
+    ))
+    history.add_messages(recent_messages)
+
+    return history
 print("[OK] Redis history sẵn sàng!")
 
 # ── RAG PIPELINE ──────────────────────────────────────────────────────────────
@@ -369,13 +431,18 @@ def get_chitchat_response(query: str) -> str:
 
 # ── BUILD OUTFIT CONTEXT ──────────────────────────────────────────────────────
 def build_outfit_context(user_query: str, gender: str = "female",
-                          profile: dict = None) -> str:
+                          profile: dict = None) -> tuple:
+    """
+    Trả về tuple (context_str, images_data):
+    - context_str: chuỗi context gửi vào LLM
+    - images_data: list[dict] {product_id, category, images: [url...]}
+    """
     base_rule = find_matching_rule(user_query, gender, profile)
     if not base_rule:
-        return ""
+        return "", []
     outfit_rules = find_outfit_details(base_rule, gender)
     if not outfit_rules:
-        return ""
+        return "", []
 
     outfit_products = {}
     for layer_b_category, rule in outfit_rules.items():
@@ -398,6 +465,8 @@ def build_outfit_context(user_query: str, gender: str = "female",
         lines.append(f"  Tone da    : {profile['tone_da']}")
     lines += ["", "SẢN PHẨM GỢI Ý:"]
 
+    images_data = []  # Thu thập ảnh sản phẩm để trả về frontend
+
     for cat, data in outfit_products.items():
         lines.append(f"\n[{cat} – {data['product_type']}]")
         lines.append(f"  Lý do: {data['ly_do']}")
@@ -411,9 +480,18 @@ def build_outfit_context(user_query: str, gender: str = "female",
                     price_fmt = price_raw
                 lines.append(f"  • (Mã SP: {pid} | Giá: {price_fmt} VNĐ)")
                 lines.append(f"    {doc.page_content[:600]}")
+
+                # Thu thập ảnh sản phẩm
+                doc_images = [url for url in doc.metadata.get("images", []) if url]
+                if doc_images:
+                    images_data.append({
+                        "product_id": pid,
+                        "category":   cat,
+                        "images":     doc_images[:2],  # Tối đa 2 ảnh/sản phẩm
+                    })
         else:
             lines.append("  • (Chưa có sản phẩm phù hợp trong kho)")
 
-    return "\n".join(lines)
+    return "\n".join(lines), images_data
 
 print("[OK] chatbot_core đã load xong — sẵn sàng phục vụ!")

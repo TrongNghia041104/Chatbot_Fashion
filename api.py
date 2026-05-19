@@ -19,6 +19,7 @@ import uuid
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 # ── Import từ chatbot_core (extracted từ Chatbot_RAG_MultiModal.ipynb) ────────
 print("[INFO] Đang load chatbot_core...")
@@ -53,6 +54,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Phục vụ thư mục ảnh (mount static files)
+images_path = os.path.join(os.path.dirname(__file__), "images")
+if os.path.exists(images_path):
+    app.mount("/images", StaticFiles(directory=images_path), name="images")
+
 # ── In-memory session store ───────────────────────────────────────────────────
 sessions: dict = {}
 
@@ -69,16 +75,35 @@ _initialized = True  # chatbot_core đã load ở import time
 def _stream_chain_via_queue(chain, input_dict: dict, config: dict, token_queue: queue.Queue, chain_type: str):
     """
     Chạy LangChain chain trong thread riêng, đẩy token vào queue.
-    chain_type: "outfit" → chunk.content  |  "search" → chunk["answer"]
+    chain_type: "outfit" → chunk.content  |  "search" → chunk["answer"], chunk["context"]
     """
     try:
         for chunk in chain.stream(input_dict, config=config):
             if chain_type == "outfit":
                 token = chunk.content if hasattr(chunk, "content") else str(chunk)
+                if token:
+                    token_queue.put({"ok": True, "item_type": "token", "content": token})
             else:  # search
-                token = chunk.get("answer", "") if isinstance(chunk, dict) else ""
-            if token:
-                token_queue.put({"ok": True, "token": token})
+                if not isinstance(chunk, dict):
+                    continue
+                # Lấy ảnh từ context (chỉ xuất hiện ở chunk đầu tiên)
+                if "context" in chunk:
+                    images = []
+                    for doc in chunk["context"]:
+                        pid = doc.metadata.get("product_id", "")
+                        doc_imgs = [u for u in doc.metadata.get("images", []) if u]
+                        if doc_imgs:
+                            images.append({
+                                "product_id": pid,
+                                "category":   doc.metadata.get("category", ""),
+                                "images":      doc_imgs[:2],  # tối đa 2 ảnh/SP
+                            })
+                    if images:
+                        token_queue.put({"ok": True, "item_type": "images", "images": images})
+                # Stream token trả lời
+                token = chunk.get("answer", "")
+                if token:
+                    token_queue.put({"ok": True, "item_type": "token", "content": token})
     except Exception as e:
         token_queue.put({"ok": False, "error": str(e)})
     finally:
@@ -237,16 +262,19 @@ async def chat(
 
         if intent == "outfit":
             try:
-                outfit_context = await asyncio.to_thread(
+                outfit_context, outfit_images = await asyncio.to_thread(
                     _build_outfit_context, final_query, gender, profile
                 )
             except Exception as e:
-                outfit_context = None
+                outfit_context, outfit_images = None, []
 
             if not outfit_context:
                 # Không có outfit context → fallback về search
                 intent = "search"
             else:
+                # Gửi ảnh sản phẩm trước khi stream text
+                if outfit_images:
+                    yield make_event({"type": "product_images", "images": outfit_images})
                 chain_input = {"input": message or final_query, "outfit_context": outfit_context}
                 t = threading.Thread(
                     target=_stream_chain_via_queue,
@@ -264,7 +292,7 @@ async def chat(
             )
             t.start()
 
-        # ── Đọc token từ queue và yield SSE ─────────────────────────
+        # ── Đọc token từ queue và yield SSE ──────────────────────────────────
         while True:
             try:
                 item = await asyncio.to_thread(token_queue.get, timeout=60)
@@ -279,11 +307,15 @@ async def chat(
                 yield make_event({"type": "error", "message": item.get("error", "Lỗi không xác định")})
                 break
 
-            token = item["token"]
-            if first_token_time is None:
-                first_token_time = time.time()
-            response_tokens.append(token)
-            yield make_event({"type": "token", "content": token})
+            item_type = item.get("item_type", "token")  # backward-compat
+            if item_type == "images":
+                yield make_event({"type": "product_images", "images": item["images"]})
+            else:
+                token = item.get("content", item.get("token", ""))
+                if first_token_time is None:
+                    first_token_time = time.time()
+                response_tokens.append(token)
+                yield make_event({"type": "token", "content": token})
             await asyncio.sleep(0)  # yield control cho event loop
 
         # ── Lưu lại response cuối cùng ────────────────────────────

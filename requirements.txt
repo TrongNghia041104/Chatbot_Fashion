@@ -24,4 +24,12 @@ tqdm
 python-dotenv
 redis
 
+# Image processing
+Pillow
+
+# API Server
+fastapi
+uvicorn
+python-multipart
+
 sentence-transformers

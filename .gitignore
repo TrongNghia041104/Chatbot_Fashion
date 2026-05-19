@@ -16,7 +16,7 @@ env/
 qdrant_data/
 qdrant_storage/
 redis_data/
-
+images/
 # Datasets
 Fashion_Metadata/
 # Bỏ comment 2 dòng dưới nếu bạn có các file csv/jsonl lớn nằm rải rác bên ngoài mà không muốn push lên

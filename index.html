@@ -112,6 +112,37 @@ aside{width:var(--sidebar);background:var(--surface);border-right:1px solid var(
 /* ERROR TOAST */
 .error-bubble{background:#fff0f0;border:1px solid #fca5a5;border-radius:10px;padding:10px 14px;font-size:.85rem;color:#b91c1c;max-width:520px}
 
+/* PRODUCT IMAGE STRIP */
+.product-images-strip{
+  display:flex;gap:10px;overflow-x:auto;padding:8px 0 4px;
+  scrollbar-width:thin;scrollbar-color:#ddd transparent;
+  max-width:680px;
+}
+.product-images-strip::-webkit-scrollbar{height:4px}
+.product-images-strip::-webkit-scrollbar-thumb{background:#ddd;border-radius:2px}
+.product-card{
+  flex-shrink:0;border-radius:12px;overflow:hidden;
+  background:var(--surface);border:1px solid var(--border);
+  box-shadow:var(--shadow);width:130px;
+  cursor:pointer;transition:transform .18s,box-shadow .18s;
+}
+.product-card:hover{transform:translateY(-3px);box-shadow:0 6px 20px rgba(0,0,0,.13)}
+.product-card img{
+  width:130px;height:130px;object-fit:cover;
+  display:block;border-bottom:1px solid var(--border);
+}
+.product-card .pc-label{
+  font-size:.68rem;color:var(--muted);padding:5px 7px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+/* LIGHTBOX */
+#lightbox{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);
+  z-index:9999;align-items:center;justify-content:center;cursor:zoom-out;
+}
+#lightbox.active{display:flex}
+#lightbox img{max-width:90vw;max-height:90vh;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+
 /* STATUS BAR */
 .status-bar{font-size:.72rem;color:var(--muted);padding:6px 32px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:16px;align-items:center}
 #status-dot{width:7px;height:7px;border-radius:50%;background:#ccc;display:inline-block;flex-shrink:0}
@@ -198,6 +229,11 @@ aside{width:var(--sidebar);background:var(--surface);border-right:1px solid var(
     </div>
   </div>
 </main>
+
+<!-- LIGHTBOX -->
+<div id="lightbox">
+  <img id="lightbox-img" src="" alt="product"/>
+</div>
 
 <script>
 // ═══════════════════════════════════════════════════════════
@@ -423,6 +459,65 @@ function showErrorBubble(msg) {
   scrollBottom();
 }
 
+// ── Product image strip ────────────────────────────────────────────
+function showProductImages(imagesList) {
+  if (!imagesList || imagesList.length === 0) return;
+
+  const row = document.createElement('div');
+  row.className = 'bubble-row bot';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = '✨';
+
+  const strip = document.createElement('div');
+  strip.className = 'product-images-strip';
+
+  imagesList.forEach(item => {
+    item.images.forEach(url => {
+      const card = document.createElement('div');
+      card.className = 'product-card';
+      card.title = `Mã SP: ${item.product_id}`;
+
+      const img = document.createElement('img');
+      img.src  = url;
+      img.alt  = item.category || 'Sản phẩm';
+      img.loading = 'lazy';
+      img.onerror = () => { card.style.display = 'none'; }; // Ẩn nếu ảnh bị lỗi
+
+      const label = document.createElement('div');
+      label.className = 'pc-label';
+      label.textContent = item.category
+        ? `${item.category} · #${item.product_id.slice(-6)}`
+        : `#${item.product_id.slice(-6)}`;
+
+      // Click → mở lightbox
+      card.addEventListener('click', () => openLightbox(url));
+
+      card.appendChild(img);
+      card.appendChild(label);
+      strip.appendChild(card);
+    });
+  });
+
+  row.appendChild(avatar);
+  row.appendChild(strip);
+  messagesEl.appendChild(row);
+  scrollBottom();
+}
+
+// ── Lightbox ─────────────────────────────────────────────────────────────
+const lightboxEl    = document.getElementById('lightbox');
+const lightboxImgEl = document.getElementById('lightbox-img');
+function openLightbox(src) {
+  lightboxImgEl.src = src;
+  lightboxEl.classList.add('active');
+}
+lightboxEl.addEventListener('click', () => lightboxEl.classList.remove('active'));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') lightboxEl.classList.remove('active');
+});
+
 function scrollBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -513,6 +608,11 @@ async function sendMessage(message, imageFile) {
           case 'intent_detected':
             updateIntentBadge(event.intent);
             if (event.gender) updateGender(event.gender);
+            break;
+
+          case 'product_images':
+            // Render dải ảnh sản phẩm người trước bubble text
+            showProductImages(event.images);
             break;
 
           case 'token':
