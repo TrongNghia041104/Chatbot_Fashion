@@ -23,3 +23,5 @@ underthesea
 tqdm
 python-dotenv
 redis
+
+sentence-transformers
