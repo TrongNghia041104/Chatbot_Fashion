@@ -8,15 +8,15 @@ services:
       - "6333:6333"
       - "6334:6334"
     volumes:
-      - ./qdrant_storage:/qdrant/storage 
+      - ./storage/qdrant:/qdrant/storage   # Đã di chuyển từ ./qdrant_storage
     restart: always
 
   redis:
     image: redis/redis-stack:latest
     container_name: fashion_redis_stack
     ports:
-      - "6379:6379"  # Port kết nối database
-      - "8001:8001"  # Port giao diện web RedisInsight
+      - "6379:6379"   # Port kết nối database
+      - "8001:8001"   # Port giao diện web RedisInsight
     volumes:
-      - ./redis_data:/data
+      - ./storage/redis:/data              # Đã di chuyển từ ./redis_data
     restart: always

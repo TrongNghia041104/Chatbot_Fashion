@@ -157,29 +157,29 @@ curl http://localhost:11434/api/tags
 
 > ⚠️ **Chỉ cần chạy 1 lần duy nhất** khi lần đầu setup. Nếu Qdrant đã có dữ liệu thì bỏ qua bước này.
 
-Đặt các file dữ liệu `.jsonl` vào thư mục `Fashion_Metadata/`:
+Đặt các file dữ liệu `.jsonl` vào thư mục `data/metadata/`:
 ```
 Chatbot_Fashion/
-└── Fashion_Metadata/
-    ├── Fashion_Metadata_Ao.jsonl
-    ├── Fashion_Metadata_Quan.jsonl
-    ├── Fashion_Metadata_Giay.jsonl
-    └── ...
+└── data/
+    └── metadata/
+        ├── Fashion_Metadata_Ao.jsonl
+        ├── Fashion_Metadata_Quan.jsonl
+        ├── Fashion_Metadata_Giay.jsonl
+        └── ...
 ```
 
 Chạy notebook hoặc chạy trực tiếp phần Data Pipeline:
 
 **Cách 1 — Dùng Jupyter Notebook:**
 ```bash
-jupyter notebook Chatbot_RAG_MultiModal.ipynb
+jupyter notebook notebooks/Chatbot_RAG_MultiModal.ipynb
 # Chạy cell "PHẦN 3: Data Pipeline" (có thể mất 15-30 phút)
 ```
 
-**Cách 2 — Chạy script Python:**
+**Cách 2 — Import trực tiếp từ app.core:**
 ```python
-# data_pipeline.py (tạo file tạm để chạy)
-from chatbot_core import *
-run_data_pipeline("./Fashion_Metadata")
+from app.core.vector_store import vector_db
+# Sau đó chạy các hàm indexing theo notebook hướng dẫn
 ```
 
 Sau khi index xong, kiểm tra:
@@ -196,13 +196,16 @@ curl http://localhost:6333/collections/fashion_products_bge_m3
 # Kích hoạt venv (nếu chưa)
 venv\Scripts\activate
 
-# Chạy FastAPI server
-uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+# Cách 1: Chạy qua main.py (khuyến nghị)
+python main.py
+
+# Cách 2: Chạy trực tiếp uvicorn
+uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Kết quả mong đợi:
 ```
-[INFO] Đang load chatbot_core...
+[INFO] Đang load app.core...
 [INFO] Đang load Embedding model BGE-M3...
 [INFO] Đang kết nối Qdrant Docker (localhost:6333)...
 [OK] Qdrant + Retriever sẵn sàng!
@@ -211,7 +214,7 @@ Kết quả mong đợi:
 [OK] LLM sẵn sàng!
 [OK] Redis history sẵn sàng!
 [OK] RAG Pipeline sẵn sàng!
-[OK] chatbot_core đã load xong — sẵn sàng phục vụ!
+[OK] app.core loaded!
 INFO: Uvicorn running on http://0.0.0.0:8000
 ```
 
@@ -220,11 +223,11 @@ INFO: Uvicorn running on http://0.0.0.0:8000
 ## BƯỚC 7 — Mở giao diện Web
 
 ```bash
-# Mở file index.html trực tiếp trong trình duyệt
-start index.html
-
-# Hoặc truy cập qua backend (nếu muốn)
+# Truy cập qua backend (khuyến nghị)
 # http://localhost:8000
+
+# Hoặc mở file trực tiếp trong trình duyệt
+start app\static\index.html
 ```
 
 ---
@@ -238,8 +241,8 @@ start index.html
 [ ] SSH Tunnel: terminal với lệnh -L 11434:localhost:11434 -N đang mở
 [ ] curl http://localhost:11434/api/tags → trả về danh sách model
 [ ] Qdrant đã có dữ liệu (points_count > 0)
-[ ] uvicorn api:app --port 8000 đang chạy
-[ ] Mở index.html → status bar hiển thị "Đã kết nối"
+[ ] python main.py → uvicorn running on http://0.0.0.0:8000
+[ ] Mở http://localhost:8000 → status bar hiển thị "Đã kết nối"
 ```
 
 ---
@@ -277,7 +280,7 @@ ollama pull qwen2.5vl:3b
 ```
 
 ### ❌ `GGML_ASSERT` lỗi khi phân tích ảnh
-Ảnh quá lớn (> 1024px). Hệ thống đã tự xử lý resize về 512px — nếu vẫn lỗi, giảm `VL_MAX_SIZE = 384` trong `chatbot_core.py`.
+Ảnh quá lớn (> 1024px). Hệ thống đã tự xử lý resize về 512px — nếu vẫn lỗi, giảm `VL_MAX_SIZE = 384` trong `app/core/vision.py`.
 
 ### ❌ Chatbot trả lời chậm (> 60s)
 - Kiểm tra GPU Vast.ai còn đang chạy không (instance có thể tự tắt)
@@ -290,21 +293,38 @@ ollama pull qwen2.5vl:3b
 ```
 Chatbot_Fashion/
 │
-├── Chatbot_RAG_MultiModal.ipynb   # Notebook chính (demo & data pipeline)
-├── chatbot_core.py                # Core logic: RAG, intent, outfit, vision
-├── api.py                         # FastAPI backend + SSE streaming
-├── index.html                     # Giao diện web chat
-│
+├── main.py                        # Entry point — chạy server
 ├── docker-compose.yml             # Qdrant + Redis Stack
 ├── requirements.txt               # Python dependencies
 │
-├── Fashion_Stylists/
-│   ├── Layer_B_Female_Knowledge.json  # 880 rules phối đồ Nữ
-│   └── Layer_B_Male_Knowledge.json    # 416 rules phối đồ Nam
+├── app/
+│   ├── config.py                  # Cấu hình tập trung (URLs, models, constants)
+│   ├── api.py                     # FastAPI backend + SSE streaming
+│   ├── static/
+│   │   └── index.html             # Giao diện web chat
+│   └── core/
+│       ├── embeddings.py          # BGE-M3 embedding wrapper
+│       ├── vector_store.py        # Qdrant + Layer B indexing
+│       ├── llm.py                 # LLM (Qwen) + tất cả prompts
+│       ├── vision.py              # Xử lý ảnh (Qwen2.5-VL)
+│       ├── intent.py              # Phân loại intent người dùng
+│       ├── outfit.py              # Logic phối đồ (Layer B)
+│       ├── history.py             # Redis chat history + summarization
+│       └── chains.py              # Lắp ráp RAG pipeline
 │
-├── Fashion_Metadata/              # Dữ liệu sản phẩm .jsonl (không commit)
-├── qdrant_storage/                # Dữ liệu Qdrant (không commit)
-└── redis_data/                    # Dữ liệu Redis (không commit)
+├── data/
+│   ├── metadata/                  # Dữ liệu sản phẩm .jsonl (không commit)
+│   └── stylists/
+│       ├── Layer_B_Female_Knowledge.json  # 880 rules phối đồ Nữ
+│       └── Layer_B_Male_Knowledge.json    # 416 rules phối đồ Nam
+│
+├── notebooks/                     # Jupyter notebooks thực nghiệm
+├── docs/                          # Tài liệu (file này nằm đây)
+├── tests/
+│   └── sample_images/             # Ảnh mẫu để test
+└── storage/                       # Docker volumes (không commit)
+    ├── qdrant/
+    └── redis/
 ```
 
 ---

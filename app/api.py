@@ -1,10 +1,13 @@
 """
-api.py — FastAPI backend cho Fashion RAG Chatbot Web Demo
-=========================================================
-Cách chạy:
-    /venv/main/bin/uvicorn api:app --reload --port 8000
+app/api.py — FastAPI backend cho Fashion RAG Chatbot Web Demo
+=============================================================
+Cách chạy từ thư mục gốc:
+    uvicorn app.api:app --reload --port 8000
 
-Yêu cầu: chatbot_core.py phải nằm cùng thư mục
+Yêu cầu:
+    - Qdrant chạy trên localhost:6333
+    - Redis chạy trên localhost:6379
+    - Ollama chạy trên localhost:11434
 """
 
 import asyncio
@@ -21,31 +24,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-# ── Import từ chatbot_core (extracted từ Chatbot_RAG_MultiModal.ipynb) ────────
-print("[INFO] Đang load chatbot_core...")
-from chatbot_core import (
+from app.config import (
+    API_TITLE, API_VERSION,
+    STATIC_DIR, IMAGES_DIR,
+)
+
+# ── Import từ app.core ────────────────────────────────────────────────────────
+print("[INFO] Đang load app.core...")
+from app.core import (
     detect_image_type, analyze_person_image, caption_product_image,
     detect_intent, detect_gender,
     get_greeting_response, get_chitchat_response,
     build_outfit_context,
     full_chat_chain, outfit_chain_with_history, vector_db,
 )
-# Alias để dùng chung tên biến nội bộ
-_full_chat_chain      = full_chat_chain
-_outfit_chain         = outfit_chain_with_history
-_detect_intent        = detect_intent
-_detect_gender        = detect_gender
-_build_outfit_context = build_outfit_context
-_detect_image_type    = detect_image_type
-_analyze_person_image = analyze_person_image
-_caption_product_image= caption_product_image
-_get_greeting_response= get_greeting_response
-_get_chitchat_response= get_chitchat_response
-_vector_db            = vector_db
-print("[OK] chatbot_core loaded!")
+print("[OK] app.core loaded!")
 
 # ── Khởi tạo FastAPI app ──────────────────────────────────────────────────────
-app = FastAPI(title="Fashion RAG Chatbot API", version="1.0.0")
+app = FastAPI(title=API_TITLE, version=API_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,13 +50,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Phục vụ thư mục ảnh (mount static files)
-images_path = os.path.join(os.path.dirname(__file__), "images")
-if os.path.exists(images_path):
-    app.mount("/images", StaticFiles(directory=images_path), name="images")
+# Phục vụ thư mục ảnh sản phẩm
+if os.path.exists(IMAGES_DIR):
+    app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
 # ── In-memory session store ───────────────────────────────────────────────────
 sessions: dict = {}
+
+_initialized = True  # app.core đã load ở import time
 
 
 # ── Helper: tạo SSE event string ─────────────────────────────────────────────
@@ -68,14 +65,21 @@ def make_event(data: dict) -> str:
     """Tạo SSE event theo chuẩn 'data: {json}\\n\\n'."""
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-_initialized = True  # chatbot_core đã load ở import time
-
 
 # ── Helper: stream chain qua queue (tránh block async event loop) ─────────────
-def _stream_chain_via_queue(chain, input_dict: dict, config: dict, token_queue: queue.Queue, chain_type: str):
+def _stream_chain_via_queue(
+    chain,
+    input_dict: dict,
+    config: dict,
+    token_queue: queue.Queue,
+    chain_type: str,
+) -> None:
     """
     Chạy LangChain chain trong thread riêng, đẩy token vào queue.
-    chain_type: "outfit" → chunk.content  |  "search" → chunk["answer"], chunk["context"]
+
+    chain_type:
+        "outfit" → chunk.content
+        "search" → chunk["answer"], chunk["context"]
     """
     try:
         for chunk in chain.stream(input_dict, config=config):
@@ -90,13 +94,13 @@ def _stream_chain_via_queue(chain, input_dict: dict, config: dict, token_queue: 
                 if "context" in chunk:
                     images = []
                     for doc in chunk["context"]:
-                        pid = doc.metadata.get("product_id", "")
+                        pid      = doc.metadata.get("product_id", "")
                         doc_imgs = [u for u in doc.metadata.get("images", []) if u]
                         if doc_imgs:
                             images.append({
                                 "product_id": pid,
                                 "category":   doc.metadata.get("category", ""),
-                                "images":      doc_imgs[:2],  # tối đa 2 ảnh/SP
+                                "images":     doc_imgs[:2],
                             })
                     if images:
                         token_queue.put({"ok": True, "item_type": "images", "images": images})
@@ -152,42 +156,36 @@ async def chat(
         if session_id not in sessions:
             sessions[session_id] = {"profile": {}, "last_bot_msg": ""}
 
-        state = sessions[session_id]
-        profile = state["profile"]
+        state        = sessions[session_id]
+        profile      = state["profile"]
         last_bot_msg = state["last_bot_msg"]
 
-        final_query = message
-        start_time = time.time()
+        final_query      = message
+        start_time       = time.time()
         first_token_time = None
 
         # ══ Xử lý ảnh ═══════════════════════════════════════════════
         if image and image.filename:
-            suffix = os.path.splitext(image.filename)[1] or ".jpg"
+            suffix   = os.path.splitext(image.filename)[1] or ".jpg"
             tmp_path = None
             try:
-                # Lưu ảnh vào file tạm
                 with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
                     tmp.write(await image.read())
                     tmp_path = tmp.name
 
-                # Detect loại ảnh: person hay product?
-                image_type = await asyncio.to_thread(_detect_image_type, tmp_path, message)
+                image_type = await asyncio.to_thread(detect_image_type, tmp_path, message)
 
                 if image_type == "person":
-                    # ── Phân tích vóc dáng ─────────────────────────
-                    person_info = await asyncio.to_thread(_analyze_person_image, tmp_path)
+                    person_info = await asyncio.to_thread(analyze_person_image, tmp_path)
 
-                    # Cập nhật profile
                     if person_info.get("dang_nguoi"):
                         profile["dang_nguoi"] = person_info["dang_nguoi"]
                     if person_info.get("tone_da"):
                         profile["tone_da"] = person_info["tone_da"]
                     sessions[session_id]["profile"] = profile
 
-                    # Gửi event phân tích về frontend
                     yield make_event({"type": "person_analyzed", **person_info})
 
-                    # Stream response giả (split từng word để có cảm giác streaming)
                     bot_reply = (
                         f"Mình đã phân tích xong rồi nhé! "
                         f"Bạn có **{person_info.get('dang_nguoi', '...')}** "
@@ -205,13 +203,12 @@ async def chat(
                     yield make_event({
                         "type": "done",
                         "ttft": 0.0,
-                        "total": round(time.time() - start_time, 2)
+                        "total": round(time.time() - start_time, 2),
                     })
-                    return  # Kết thúc — không chạy RAG
+                    return
 
                 else:
-                    # ── Caption ảnh sản phẩm ───────────────────────
-                    caption = await asyncio.to_thread(_caption_product_image, tmp_path, message)
+                    caption     = await asyncio.to_thread(caption_product_image, tmp_path, message)
                     yield make_event({"type": "product_captioned", "caption": caption})
                     final_query = f"{caption}. Yêu cầu: {message}" if message else caption
 
@@ -224,13 +221,12 @@ async def chat(
 
         # ══ Detect intent & gender ════════════════════════════════════
         try:
-            intent = await asyncio.to_thread(_detect_intent, final_query, last_bot_msg)
-            current_gender = await asyncio.to_thread(_detect_gender, final_query)
+            intent         = await asyncio.to_thread(detect_intent, final_query, last_bot_msg)
+            current_gender = await asyncio.to_thread(detect_gender, final_query)
         except Exception as e:
             yield make_event({"type": "error", "message": f"Lỗi detect intent: {str(e)}"})
             return
 
-        # Chỉ cập nhật gender nếu detect được "male" (mặc định female)
         if current_gender == "male":
             profile["gender"] = "male"
         gender = profile.get("gender", current_gender or "female")
@@ -238,47 +234,42 @@ async def chat(
         yield make_event({"type": "intent_detected", "intent": intent, "gender": gender})
 
         # ══ Routing ══════════════════════════════════════════════════
-        response_tokens = []
+        response_tokens: list[str] = []
 
-        # ── Greeting ────────────────────────────────────────────────
         if intent == "greeting":
-            reply = await asyncio.to_thread(_get_greeting_response)
+            reply = await asyncio.to_thread(get_greeting_response)
             yield make_event({"type": "token", "content": reply})
             sessions[session_id]["last_bot_msg"] = reply
             yield make_event({"type": "done", "ttft": 0.0, "total": round(time.time() - start_time, 2)})
             return
 
-        # ── Chitchat ─────────────────────────────────────────────────
         if intent == "chitchat":
-            reply = await asyncio.to_thread(_get_chitchat_response, final_query)
+            reply = await asyncio.to_thread(get_chitchat_response, final_query)
             yield make_event({"type": "token", "content": reply})
             sessions[session_id]["last_bot_msg"] = reply
             yield make_event({"type": "done", "ttft": 0.0, "total": round(time.time() - start_time, 2)})
             return
 
-        # ── Outfit / Search ───────────────────────────────────────────
-        config = {"configurable": {"session_id": session_id}}
+        config      = {"configurable": {"session_id": session_id}}
         token_queue: queue.Queue = queue.Queue()
 
         if intent == "outfit":
             try:
                 outfit_context, outfit_images = await asyncio.to_thread(
-                    _build_outfit_context, final_query, gender, profile
+                    build_outfit_context, final_query, gender, profile,
                 )
-            except Exception as e:
+            except Exception:
                 outfit_context, outfit_images = None, []
 
             if not outfit_context:
-                # Không có outfit context → fallback về search
-                intent = "search"
+                intent = "search"   # fallback
             else:
-                # Gửi ảnh sản phẩm trước khi stream text
                 if outfit_images:
                     yield make_event({"type": "product_images", "images": outfit_images})
                 chain_input = {"input": message or final_query, "outfit_context": outfit_context}
                 t = threading.Thread(
                     target=_stream_chain_via_queue,
-                    args=(_outfit_chain, chain_input, config, token_queue, "outfit"),
+                    args=(outfit_chain_with_history, chain_input, config, token_queue, "outfit"),
                     daemon=True,
                 )
                 t.start()
@@ -287,12 +278,12 @@ async def chat(
             chain_input = {"input": final_query}
             t = threading.Thread(
                 target=_stream_chain_via_queue,
-                args=(_full_chat_chain, chain_input, config, token_queue, "search"),
+                args=(full_chat_chain, chain_input, config, token_queue, "search"),
                 daemon=True,
             )
             t.start()
 
-        # ── Đọc token từ queue và yield SSE ──────────────────────────────────
+        # ── Đọc token từ queue và yield SSE ──────────────────────────
         while True:
             try:
                 item = await asyncio.to_thread(token_queue.get, timeout=60)
@@ -301,13 +292,13 @@ async def chat(
                 break
 
             if item is None:
-                break  # sentinel — chain đã xong
+                break
 
             if not item.get("ok", False):
                 yield make_event({"type": "error", "message": item.get("error", "Lỗi không xác định")})
                 break
 
-            item_type = item.get("item_type", "token")  # backward-compat
+            item_type = item.get("item_type", "token")
             if item_type == "images":
                 yield make_event({"type": "product_images", "images": item["images"]})
             else:
@@ -316,9 +307,9 @@ async def chat(
                     first_token_time = time.time()
                 response_tokens.append(token)
                 yield make_event({"type": "token", "content": token})
-            await asyncio.sleep(0)  # yield control cho event loop
+            await asyncio.sleep(0)
 
-        # ── Lưu lại response cuối cùng ────────────────────────────
+        # ── Lưu response cuối cùng ────────────────────────────────────
         full_response = "".join(response_tokens)
         sessions[session_id]["last_bot_msg"] = full_response
 
@@ -340,11 +331,11 @@ async def chat(
     )
 
 
-# ── Serve index.html từ thư mục cùng cấp ─────────────────────────────────────
+# ── Serve index.html ──────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
-    """Serve file index.html (nếu chạy qua uvicorn)."""
-    html_path = os.path.join(os.path.dirname(__file__), "index.html")
+    """Serve file index.html từ app/static/."""
+    html_path = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(html_path):
         with open(html_path, encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
@@ -355,8 +346,3 @@ async def serve_index():
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "initialized": _initialized}
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
