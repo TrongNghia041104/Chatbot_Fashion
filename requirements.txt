@@ -27,6 +27,12 @@ redis
 # Image processing
 Pillow
 
+# ViFashionCLIP / embedding notebook
+torch
+transformers
+jupyter
+ipykernel
+
 # API Server
 fastapi
 uvicorn

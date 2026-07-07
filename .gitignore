@@ -20,7 +20,7 @@ storage/
 images/
 
 # Datasets
-data/metadata/
+# data/metadata/
 Document/
 English/
 Vietnamese/
