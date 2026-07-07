@@ -14,10 +14,18 @@ env/
 
 # Databases & Storage
 qdrant_data/
+qdrant_storage/
+redis_data/
 storage/
 images/
+
 # Datasets
 data/metadata/
+Document/
+English/
+Vietnamese/
+*.zip
+
 # Bỏ comment 2 dòng dưới nếu bạn có các file csv/jsonl lớn nằm rải rác bên ngoài mà không muốn push lên
 # *.jsonl
 # *.csv
