@@ -23,8 +23,9 @@ images/
 data/metadata/
 Document/
 English/
-Vietnamese/
+# Vietnamese/
 *.zip
+*.pt
 
 # Bỏ comment 2 dòng dưới nếu bạn có các file csv/jsonl lớn nằm rải rác bên ngoài mà không muốn push lên
 # *.jsonl

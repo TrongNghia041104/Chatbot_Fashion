@@ -1,105 +1,102 @@
-"""
-app/core/vision.py — Vision Functions (Qwen2.5-VL)
-====================================================
-Xử lý ảnh: phân loại ảnh, phân tích vóc dáng, caption sản phẩm.
-Sử dụng model Qwen2.5-VL qua Ollama.
-"""
+"""Vision helpers for uploaded person/product images."""
+
+from __future__ import annotations
 
 import base64
+import io
 import os
 
 import ollama
+from PIL import Image
 
-from app.config import VISION_MODEL
+from app.config import (
+    LAYER_B_DANG_NGUOI,
+    LAYER_B_TONE_DA,
+    QWEN_VL_MODEL,
+    VL_MAX_SIZE,
+)
+
+
+def _preprocess_image(image_path: str) -> str:
+    """Resize and JPEG-encode images before sending them to Qwen-VL."""
+    image = Image.open(image_path).convert("RGB")
+    width, height = image.size
+    if max(width, height) > VL_MAX_SIZE:
+        ratio = VL_MAX_SIZE / max(width, height)
+        image = image.resize((int(width * ratio), int(height * ratio)), Image.LANCZOS)
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    return base64.b64encode(buffer.getvalue()).decode()
 
 
 def _call_vl(image_path: str, prompt: str) -> str:
-    """
-    Gọi Vision-Language model với ảnh và prompt.
-
-    Args:
-        image_path: Đường dẫn tuyệt đối đến file ảnh.
-        prompt: Câu hỏi/hướng dẫn cho model.
-
-    Returns:
-        Chuỗi phản hồi từ model.
-
-    Raises:
-        FileNotFoundError: Nếu không tìm thấy file ảnh.
-    """
+    """Call Qwen-VL through Ollama and return an empty string on model errors."""
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Không tìm thấy ảnh: {image_path}")
-
-    with open(image_path, "rb") as f:
-        img_b64 = base64.b64encode(f.read()).decode()
-
-    resp = ollama.chat(
-        model=VISION_MODEL,
-        messages=[{"role": "user", "content": prompt, "images": [img_b64]}],
-    )
-    return resp["message"]["content"].strip()
+    img_b64 = _preprocess_image(image_path)
+    try:
+        response = ollama.chat(
+            model=QWEN_VL_MODEL,
+            messages=[{"role": "user", "content": prompt, "images": [img_b64]}],
+        )
+        return response["message"]["content"].strip()
+    except Exception as exc:
+        print(f"[VISION ERROR] {exc}")
+        return ""
 
 
 def detect_image_type(image_path: str, user_query: str = "") -> str:
-    """
-    Xác định ảnh là người (person) hay sản phẩm (product).
-
-    Returns:
-        "person" hoặc "product"
-    """
+    """Return product or person, using both image content and the user's request."""
     prompt = (
-        "Ảnh này chứa gì? Trả lời đúng 1 chữ: "
-        "PERSON nếu là ảnh chụp người, PRODUCT nếu là ảnh sản phẩm thời trang. "
-        "Chỉ trả lời PERSON hoặc PRODUCT."
+        f'Ảnh này chứa người hay chứa sản phẩm?\n'
+        f'Câu hỏi của người dùng: "{user_query}"\n\n'
+        f"Dựa vào câu hỏi và ảnh, xác định MỤC ĐÍCH của người dùng:\n"
+        f"1. Muốn tìm/hỏi về quần áo/món đồ trong ảnh (dù có người mẫu mặc) -> PRODUCT\n"
+        f"2. Muốn phân tích vóc dáng/tone da của người trong ảnh -> PERSON\n"
+        f"3. Không có câu hỏi + ảnh chủ yếu là người -> PERSON\n"
+        f"4. Không có câu hỏi + ảnh chụp sát sản phẩm -> PRODUCT\n\n"
+        f"Chỉ trả lời đúng 1 chữ: PERSON hoặc PRODUCT."
     )
     result = _call_vl(image_path, prompt).upper()
-    return "person" if "PERSON" in result else "product"
+    return "product" if "PRODUCT" in result else "person"
 
 
 def analyze_person_image(image_path: str) -> dict:
-    """
-    Phân tích vóc dáng và tone da của người trong ảnh.
-
-    Returns:
-        dict với keys: dang_nguoi, tone_da, nhan_xet
-    """
-    prompt = """\
-Bạn là chuyên gia tư vấn thời trang. Hãy phân tích người trong ảnh:
-1. DÁNG NGƯỜI (chọn 1): Dáng chữ A | Dáng quả lê | Dáng táo | Dáng đồng hồ cát | Dáng chữ H | Dáng chữ V | Dáng thẳng
-2. TONE DA (chọn 1): Da trắng | Da vàng | Da ngăm | Da tối
-3. NHẬN XÉT: 1-2 câu về điểm nổi bật khi phối đồ.
-Trả lời theo format:
-DÁNG: [tên dáng]
-TONE: [tên tone]
-NHẬN XÉT: [nội dung]\
-"""
+    """Analyze body shape and skin tone using labels that match Layer B filters."""
+    dang_list = " | ".join(LAYER_B_DANG_NGUOI)
+    tone_list = " | ".join(LAYER_B_TONE_DA)
+    prompt = (
+        f"Bạn là chuyên gia tư vấn thời trang. Phân tích người trong ảnh:\n\n"
+        f"1. DÁNG NGƯỜI (chọn đúng 1 trong danh sách): {dang_list}\n"
+        f"2. TONE DA (chọn đúng 1 trong danh sách): {tone_list}\n"
+        f"3. NHẬN XÉT: 1-2 câu về điểm nổi bật có thể khai thác khi phối đồ.\n\n"
+        f"Trả lời theo đúng format (không thêm gì khác):\n"
+        f"DÁNG: [tên dáng]\n"
+        f"TONE: [tên tone]\n"
+        f"NHẬN XÉT: [nội dung]"
+    )
     raw = _call_vl(image_path, prompt)
-    profile: dict = {"dang_nguoi": None, "tone_da": None, "nhan_xet": ""}
-
+    profile = {"dang_nguoi": None, "tone_da": None, "nhan_xet": ""}
     for line in raw.splitlines():
         line = line.strip()
-        if line.startswith("DÁNG:"):
-            profile["dang_nguoi"] = line.replace("DÁNG:", "").strip()
-        elif line.startswith("TONE:"):
-            profile["tone_da"] = line.replace("TONE:", "").strip()
-        elif line.startswith("NHẬN XÉT:"):
-            profile["nhan_xet"] = line.replace("NHẬN XÉT:", "").strip()
-
+        upper = line.upper()
+        if "DÁNG" in upper and ":" in line:
+            value = line.split(":", 1)[1].strip()
+            profile["dang_nguoi"] = value or None
+        elif "TONE" in upper and ":" in line:
+            value = line.split(":", 1)[1].strip()
+            profile["tone_da"] = value or None
+        elif "NHẬN XÉT" in upper and ":" in line:
+            profile["nhan_xet"] = line.split(":", 1)[1].strip()
     return profile
 
 
 def caption_product_image(image_path: str, user_query: str = "") -> str:
-    """
-    Tạo mô tả (caption) cho ảnh sản phẩm thời trang bằng tiếng Việt.
-
-    Returns:
-        Chuỗi mô tả sản phẩm.
-    """
+    """Caption a product image as a fallback query when vector image search fails."""
     prompt = (
-        "Mô tả sản phẩm thời trang trong ảnh bằng tiếng Việt. "
-        "Bao gồm: loại sản phẩm, màu sắc, kiểu dáng, chất liệu, phong cách. Ngắn gọn 1-2 câu."
+        f'Câu hỏi của người dùng: "{user_query}"\n\n'
+        f"Mô tả chi tiết MÓN ĐỒ THỜI TRANG mà người dùng đang quan tâm trong ảnh bằng tiếng Việt.\n"
+        f"Bao gồm: loại sản phẩm, màu sắc, kiểu dáng, chất liệu (nếu nhận ra), phong cách.\n"
+        f"Ngắn gọn 1-2 câu. TUYỆT ĐỐI KHÔNG mô tả người mẫu."
     )
     return _call_vl(image_path, prompt)
-
-
-print("[OK] Vision functions sẵn sàng!")

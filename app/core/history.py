@@ -80,4 +80,4 @@ def get_message_history(session_id: str) -> RedisChatMessageHistory:
     return history
 
 
-print("[OK] Redis history sẵn sàng!")
+print("[OK] Redis history ready.")

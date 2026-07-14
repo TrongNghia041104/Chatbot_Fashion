@@ -1,80 +1,291 @@
-"""
-app/core/vector_store.py — Qdrant Vector Store & Retriever
-===========================================================
-Khởi tạo kết nối Qdrant, vector store và retriever.
-Module này cũng chịu trách nhiệm index Layer B knowledge vào Qdrant.
-"""
+"""Qdrant access, product retrieval, and Layer B indexing."""
+
+from __future__ import annotations
 
 import json
+import time
+from pathlib import Path
+from threading import Lock
+from typing import Any
 
+import torch
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
 from langchain_qdrant import QdrantVectorStore
+from pydantic import ConfigDict
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams
 from qdrant_client.models import PointStruct
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from app.config import (
-    QDRANT_URL,
+    ENABLE_PRODUCT_RERANKER,
+    LAYER_B_FEMALE_PATH,
+    LAYER_B_MALE_PATH,
+    LAYER_B_VECTOR_SIZE,
+    PRODUCT_SEARCH_BRAND_LIMIT,
+    PRODUCT_SEARCH_CANDIDATE_K,
+    PRODUCT_SEARCH_PAGE_SIZE,
+    PRODUCT_VECTOR_SIZE,
     QDRANT_COLLECTION_FASHION,
     QDRANT_COLLECTION_LAYER_B_F,
     QDRANT_COLLECTION_LAYER_B_M,
-    QDRANT_VECTOR_SIZE,
-    RETRIEVER_K,
-    RETRIEVER_SCORE_THRESHOLD,
-    LAYER_B_FEMALE_PATH,
-    LAYER_B_MALE_PATH,
+    QDRANT_URL,
+    RERANKER_BATCH_SIZE,
+    RERANKER_MODEL_NAME,
+    RERANKER_TOP_N,
+    RETRIEVAL_RETRY_COUNT,
+    RETRIEVAL_RETRY_SLEEP,
 )
-from app.core.embeddings import custom_embeddings
+from app.core.embeddings import get_product_embeddings, get_rule_embeddings
 
 
-# ── Qdrant Client ─────────────────────────────────────────────────────────────
-print("[INFO] Đang kết nối Qdrant Docker (localhost:6333)...")
-client = QdrantClient(url=QDRANT_URL)
-
-# ── Vector Store (Layer A — fashion products) ─────────────────────────────────
-vector_db = QdrantVectorStore(
-    client=client,
-    collection_name=QDRANT_COLLECTION_FASHION,
-    embedding=custom_embeddings,
-)
-
-retriever = vector_db.as_retriever(
-    search_type="similarity_score_threshold",
-    search_kwargs={"k": RETRIEVER_K, "score_threshold": RETRIEVER_SCORE_THRESHOLD},
-)
-print("[OK] Qdrant + Retriever sẵn sàng!")
+_client: QdrantClient | None = None
+_vector_db: QdrantVectorStore | None = None
+_retriever: BaseRetriever | None = None
+_product_reranker = None
+_reranker_enabled = ENABLE_PRODUCT_RERANKER
+_lock = Lock()
 
 
-# ── Layer B Indexing ──────────────────────────────────────────────────────────
-def _load_layer_b(file_path: str) -> list:
-    with open(file_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def get_qdrant_client() -> QdrantClient:
+    """Lazy Qdrant client. Network calls happen when a collection is queried."""
+    global _client
+    if _client is None:
+        with _lock:
+            if _client is None:
+                _client = QdrantClient(url=QDRANT_URL)
+    return _client
 
 
-def index_layer_b(data: list, collection_name: str) -> None:
-    """Index Layer B knowledge vào Qdrant (bỏ qua nếu collection đã tồn tại)."""
-    existing = [c.name for c in client.get_collections().collections]
-    if collection_name in existing:
-        print(f"[SKIP] {collection_name} đã tồn tại — bỏ qua index.")
+client = get_qdrant_client()
+
+
+def _load_layer_b(file_path: str | Path) -> list[dict]:
+    with Path(file_path).open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+layer_b_female = _load_layer_b(LAYER_B_FEMALE_PATH)
+layer_b_male = _load_layer_b(LAYER_B_MALE_PATH)
+
+
+def _collection_exists(collection_name: str) -> bool:
+    qdrant = get_qdrant_client()
+    try:
+        return qdrant.collection_exists(collection_name)
+    except AttributeError:
+        return collection_name in [c.name for c in qdrant.get_collections().collections]
+
+
+def index_layer_b(data: list[dict], collection_name: str) -> None:
+    """Index outfit-rule knowledge into Qdrant if the collection is missing."""
+    qdrant = get_qdrant_client()
+    if _collection_exists(collection_name):
+        print(f"[SKIP] {collection_name} already exists.")
         return
 
-    client.create_collection(
+    qdrant.create_collection(
         collection_name=collection_name,
-        vectors_config=VectorParams(size=QDRANT_VECTOR_SIZE, distance=Distance.COSINE),
+        vectors_config=VectorParams(size=LAYER_B_VECTOR_SIZE, distance=Distance.COSINE),
     )
+    rule_embeddings = get_rule_embeddings()
     points = []
     for i, rule in enumerate(data):
         text = f"{rule['rule_key']} {rule['phong_cach']} {rule['boi_canh']} {rule['ly_do_tu_van']}"
-        vector = custom_embeddings.embed_query(text)
-        points.append(PointStruct(id=i, vector=vector, payload=rule))
-
-    client.upsert(collection_name=collection_name, points=points)
-    print(f"[OK] Indexed {len(points)} rules → {collection_name}")
+        points.append(PointStruct(id=i, vector=rule_embeddings.embed_query(text), payload=rule))
+    qdrant.upsert(collection_name=collection_name, points=points)
+    print(f"[OK] Indexed {len(points)} Layer B rules -> {collection_name}")
 
 
-# ── Load & Index Layer B khi module được import ───────────────────────────────
-layer_b_female = _load_layer_b(LAYER_B_FEMALE_PATH)
-layer_b_male   = _load_layer_b(LAYER_B_MALE_PATH)
-print(f"[OK] Layer B: {len(layer_b_female)} rules Nữ | {len(layer_b_male)} rules Nam")
+def ensure_layer_b_indexed() -> None:
+    """Create Layer B collections on demand. Skips quickly when they already exist."""
+    index_layer_b(layer_b_female, QDRANT_COLLECTION_LAYER_B_F)
+    index_layer_b(layer_b_male, QDRANT_COLLECTION_LAYER_B_M)
 
-index_layer_b(layer_b_female, QDRANT_COLLECTION_LAYER_B_F)
-index_layer_b(layer_b_male,   QDRANT_COLLECTION_LAYER_B_M)
+
+def normalize_product_metadata(doc: Document) -> Document:
+    """Ensure each product document has a stable image_url for rendering."""
+    images = doc.metadata.get("images", [])
+    if isinstance(images, str):
+        images = [images] if images else []
+    doc.metadata["images"] = images
+    doc.metadata["image_url"] = doc.metadata.get("image_url") or (images[0] if images else "")
+    return doc
+
+
+def diversity_filter_documents(
+    docs: list[Document],
+    max_docs: int = PRODUCT_SEARCH_PAGE_SIZE,
+    max_per_brand: int = PRODUCT_SEARCH_BRAND_LIMIT,
+) -> list[Document]:
+    """Dedupe by product_id and limit repeated brands."""
+    selected: list[Document] = []
+    seen_product_ids: set[str] = set()
+    brand_counts: dict[str, int] = {}
+
+    for doc in docs:
+        doc = normalize_product_metadata(doc)
+        product_id = str(doc.metadata.get("product_id", "")).strip().lower()
+        brand = str(doc.metadata.get("brand", "")).strip().lower()
+        if product_id and product_id in seen_product_ids:
+            continue
+        if brand and brand_counts.get(brand, 0) >= max_per_brand:
+            continue
+        selected.append(doc)
+        if product_id:
+            seen_product_ids.add(product_id)
+        if brand:
+            brand_counts[brand] = brand_counts.get(brand, 0) + 1
+        if len(selected) >= max_docs:
+            return selected
+
+    for doc in docs:
+        if len(selected) >= max_docs:
+            break
+        doc = normalize_product_metadata(doc)
+        product_id = str(doc.metadata.get("product_id", "")).strip().lower()
+        if product_id and product_id in seen_product_ids:
+            continue
+        selected.append(doc)
+        if product_id:
+            seen_product_ids.add(product_id)
+
+    return selected
+
+
+class ProductCrossEncoderReranker:
+    """Lazy cross-encoder reranker with safe fallback."""
+
+    def __init__(self, model_name: str = RERANKER_MODEL_NAME):
+        self.model_name = model_name
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        self.model.to(self.device)
+        self.model.eval()
+        print(f"[OK] Reranker loaded: {model_name} on {self.device}")
+
+    def score_pairs(
+        self,
+        query: str,
+        docs: list[Document],
+        batch_size: int = RERANKER_BATCH_SIZE,
+    ) -> list[float]:
+        scores: list[float] = []
+        pairs = [(query, doc.page_content[:1400]) for doc in docs]
+        with torch.no_grad():
+            for start in range(0, len(pairs), batch_size):
+                batch = pairs[start : start + batch_size]
+                inputs = self.tokenizer(
+                    batch,
+                    padding=True,
+                    truncation=True,
+                    max_length=512,
+                    return_tensors="pt",
+                ).to(self.device)
+                logits = self.model(**inputs).logits
+                batch_scores = logits[:, -1] if logits.ndim == 2 and logits.shape[-1] > 1 else logits.reshape(-1)
+                scores.extend(batch_scores.detach().float().cpu().tolist())
+        return scores
+
+
+def get_product_reranker():
+    """Load reranker lazily; disable it if unavailable."""
+    global _product_reranker, _reranker_enabled
+    if not _reranker_enabled:
+        return None
+    if _product_reranker is not None:
+        return _product_reranker
+    try:
+        _product_reranker = ProductCrossEncoderReranker(RERANKER_MODEL_NAME)
+        return _product_reranker
+    except Exception as exc:
+        _reranker_enabled = False
+        print(f"[WARN] Reranker unavailable -> dense retrieval only: {exc}")
+        return None
+
+
+def is_reranker_enabled() -> bool:
+    return bool(_reranker_enabled)
+
+
+def rerank_documents(query: str, docs: list[Document], top_n: int = RERANKER_TOP_N) -> list[Document]:
+    reranker = get_product_reranker()
+    if reranker is None or not docs:
+        return docs
+    try:
+        scores = reranker.score_pairs(query, docs)
+        ranked = sorted(zip(docs, scores), key=lambda pair: pair[1], reverse=True)
+        output = []
+        for rank, (doc, score) in enumerate(ranked[:top_n], start=1):
+            doc.metadata["rerank_score"] = float(score)
+            doc.metadata["rerank_rank"] = rank
+            output.append(doc)
+        return output
+    except Exception as exc:
+        print(f"[WARN] Rerank failed -> dense order: {exc}")
+        return docs
+
+
+def safe_base_retrieve(base_retriever, query: str) -> list[Document]:
+    """Retry Qdrant retrieval; return [] instead of crashing the chat."""
+    last_error = None
+    total_attempts = RETRIEVAL_RETRY_COUNT + 1
+    for attempt in range(total_attempts):
+        try:
+            return base_retriever.invoke(query)
+        except Exception as exc:
+            last_error = exc
+            print(f"[WARN] Retrieval failed {attempt + 1}/{total_attempts}: {type(exc).__name__}: {exc}")
+            if attempt < total_attempts - 1:
+                time.sleep(RETRIEVAL_RETRY_SLEEP * (attempt + 1))
+    print(f"[ERROR] Retrieval unavailable for query={query!r}. Last error: {last_error}")
+    return []
+
+
+class DiversityFilteredRetriever(BaseRetriever):
+    """Qdrant candidates -> optional rerank -> dedupe/diversify."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    base_retriever: Any
+    max_docs: int = PRODUCT_SEARCH_PAGE_SIZE
+
+    def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:
+        raw_docs = safe_base_retrieve(self.base_retriever, query)
+        if not raw_docs:
+            return []
+        ranked_docs = rerank_documents(query, raw_docs, top_n=RERANKER_TOP_N)
+        return diversity_filter_documents(ranked_docs, max_docs=self.max_docs)
+
+
+def get_product_vector_db() -> QdrantVectorStore:
+    """Lazy Layer A ViFashionCLIP vector store."""
+    global _vector_db
+    if _vector_db is None:
+        with _lock:
+            if _vector_db is None:
+                _vector_db = QdrantVectorStore(
+                    client=get_qdrant_client(),
+                    collection_name=QDRANT_COLLECTION_FASHION,
+                    embedding=get_product_embeddings(),
+                )
+    return _vector_db
+
+
+def get_product_retriever() -> BaseRetriever:
+    """Lazy product retriever used by the RAG chain."""
+    global _retriever
+    if _retriever is None:
+        with _lock:
+            if _retriever is None:
+                base_retriever = get_product_vector_db().as_retriever(
+                    search_type="similarity",
+                    search_kwargs={"k": PRODUCT_SEARCH_CANDIDATE_K},
+                )
+                _retriever = DiversityFilteredRetriever(
+                    base_retriever=base_retriever,
+                    max_docs=PRODUCT_SEARCH_PAGE_SIZE,
+                )
+    return _retriever

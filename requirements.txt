@@ -23,6 +23,7 @@ underthesea
 tqdm
 python-dotenv
 redis
+requests
 
 # Image processing
 Pillow

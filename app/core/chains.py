@@ -1,48 +1,83 @@
-"""
-app/core/chains.py — RAG Pipeline Assembly
-===========================================
-Lắp ráp các LangChain chains từ các components đã khởi tạo:
-- full_chat_chain: Chain tìm kiếm sản phẩm (RAG + history)
-- outfit_chain_with_history: Chain tư vấn phối đồ (LLM + history)
-"""
+"""Lazy LangChain pipeline assembly."""
 
-from langchain_classic.chains import create_retrieval_chain, create_history_aware_retriever
+from __future__ import annotations
+
+from threading import Lock
+
+from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
-from app.core.llm import llm, QA_PROMPT, contextualize_q_prompt, doc_prompt, outfit_prompt
-from app.core.vector_store import retriever
 from app.core.history import get_message_history
+from app.core.llm import QA_PROMPT, contextualize_q_prompt, doc_prompt, llm, outfit_prompt
+from app.core.vector_store import get_product_retriever
 
-print("[INFO] Đang lắp ráp RAG Pipeline...")
 
-# ── RAG Chain (Search) ────────────────────────────────────────────────────────
-history_aware_retriever = create_history_aware_retriever(
-    llm, retriever, contextualize_q_prompt,
-)
-document_chain = create_stuff_documents_chain(
-    llm=llm,
-    prompt=QA_PROMPT,
-    document_prompt=doc_prompt,
-)
-rag_chain = create_retrieval_chain(history_aware_retriever, document_chain)
+_full_chat_chain = None
+_product_answer_chain = None
+_outfit_chain = None
+_chain_lock = Lock()
 
-full_chat_chain = RunnableWithMessageHistory(
-    rag_chain,
-    get_message_history,
-    input_messages_key="input",
-    history_messages_key="chat_history",
-    output_messages_key="answer",
-)
 
-# ── Outfit Chain ──────────────────────────────────────────────────────────────
-outfit_llm_chain = outfit_prompt | llm
+def get_full_chat_chain():
+    """Full text-search RAG chain: rewrite -> retrieve -> answer."""
+    global _full_chat_chain
+    if _full_chat_chain is None:
+        with _chain_lock:
+            if _full_chat_chain is None:
+                history_aware_retriever = create_history_aware_retriever(
+                    llm,
+                    get_product_retriever(),
+                    contextualize_q_prompt,
+                )
+                document_chain = create_stuff_documents_chain(
+                    llm=llm,
+                    prompt=QA_PROMPT,
+                    document_prompt=doc_prompt,
+                )
+                rag_chain = create_retrieval_chain(history_aware_retriever, document_chain)
+                _full_chat_chain = RunnableWithMessageHistory(
+                    rag_chain,
+                    get_message_history,
+                    input_messages_key="input",
+                    history_messages_key="chat_history",
+                    output_messages_key="answer",
+                )
+    return _full_chat_chain
 
-outfit_chain_with_history = RunnableWithMessageHistory(
-    outfit_llm_chain,
-    get_message_history,
-    input_messages_key="input",
-    history_messages_key="chat_history",
-)
 
-print("[OK] RAG Pipeline sẵn sàng!")
+def get_product_answer_chain():
+    """LLM-only product answer chain for documents pre-fetched by image search."""
+    global _product_answer_chain
+    if _product_answer_chain is None:
+        with _chain_lock:
+            if _product_answer_chain is None:
+                product_answer_llm_chain = QA_PROMPT | llm
+                _product_answer_chain = RunnableWithMessageHistory(
+                    product_answer_llm_chain,
+                    get_message_history,
+                    input_messages_key="input",
+                    history_messages_key="chat_history",
+                )
+    return _product_answer_chain
+
+
+def get_image_search_chain():
+    """Backward-compatible alias for product-answer chain."""
+    return get_product_answer_chain()
+
+
+def get_outfit_chain():
+    """LLM-only outfit chain fed by build_outfit_context()."""
+    global _outfit_chain
+    if _outfit_chain is None:
+        with _chain_lock:
+            if _outfit_chain is None:
+                outfit_llm_chain = outfit_prompt | llm
+                _outfit_chain = RunnableWithMessageHistory(
+                    outfit_llm_chain,
+                    get_message_history,
+                    input_messages_key="input",
+                    history_messages_key="chat_history",
+                )
+    return _outfit_chain

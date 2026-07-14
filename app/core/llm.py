@@ -1,137 +1,137 @@
-"""
-app/core/llm.py — LLM & Prompts
-================================
-Khởi tạo ChatOllama và định nghĩa tất cả prompt templates.
-"""
+"""LLM instance and prompts for research-demo v3."""
 
+from __future__ import annotations
+
+from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
 from langchain_ollama import ChatOllama
-from langchain_core.prompts import PromptTemplate, ChatPromptTemplate, MessagesPlaceholder
 
 from app.config import (
     LLM_MODEL,
+    LLM_NUM_CTX,
+    LLM_NUM_PREDICT,
     LLM_TEMPERATURE,
     LLM_TIMEOUT,
-    LLM_NUM_PREDICT,
-    LLM_NUM_CTX,
+    OLLAMA_BASE_URL,
 )
+from app.core.vector_store import normalize_product_metadata
 
 
-# ── LLM Instance ──────────────────────────────────────────────────────────────
-print("[INFO] Đang khởi tạo LLM Qwen local...")
 llm = ChatOllama(
     model=LLM_MODEL,
+    base_url=OLLAMA_BASE_URL,
     temperature=LLM_TEMPERATURE,
     timeout=LLM_TIMEOUT,
     num_predict=LLM_NUM_PREDICT,
     num_ctx=LLM_NUM_CTX,
 )
-print("[OK] LLM sẵn sàng!")
 
 
-# ── System Prompt (RAG Search) ────────────────────────────────────────────────
-_SEARCH_SYSTEM_PROMPT = """\
-Bạn là một chuyên viên tư vấn thời trang cao cấp, có gu thẩm mỹ tinh tế \
-và giọng văn vô cùng thân thiện, thanh lịch.
+SEARCH_SYSTEM_PROMPT = (
+    "Bạn là chuyên viên tư vấn thời trang cao cấp, thân thiện và nói tiếng Việt tự nhiên.\n\n"
+    "QUY TẮC TỐI CAO:\n"
+    "1. Chỉ dùng thông tin có trong phần \"DỮ LIỆU SẢN PHẨM\". Không bịa tên, mã, giá, ảnh hoặc đặc điểm.\n"
+    "2. Giới thiệu tối đa 5 sản phẩm. Nếu context có nhiều hơn, chọn 5 sản phẩm phù hợp nhất.\n"
+    "3. Toàn bộ câu trả lời không vượt quá 400 từ.\n"
+    "4. Trước khi trả lời, tự kiểm tra sản phẩm có đúng nhu cầu không. Không trình bày quá trình suy luận.\n"
+    "5. Kết thúc bằng đúng 1 câu hỏi gợi mở để tiếp tục tư vấn.\n\n"
+    "SCHEMA BẮT BUỘC:\n"
+    "Mình gợi ý cho bạn tối đa 5 lựa chọn sau:\n\n"
+    "1. **Tên sản phẩm**\n"
+    "- Mã SP: [MÃ_SP]\n"
+    "- Giá: [GIÁ] VND\n"
+    "- Đặc điểm: [màu/chất liệu/kiểu dáng/dịp mặc nổi bật]\n"
+    "- Lý do phù hợp: [1 câu ngắn, dựa trên yêu cầu của khách]\n"
+    "- Ảnh: ![Sản phẩm]([IMAGE_URL])\n\n"
+    "Nếu không có ảnh, ghi: \"Ảnh: Chưa có ảnh\".\n"
+    "Nếu không có sản phẩm phù hợp trong context, xin lỗi ngắn gọn và hỏi khách có muốn đổi phong cách không.\n\n"
+    "DỮ LIỆU SẢN PHẨM:\n"
+    "{context}"
+)
 
-QUY TẮC TỐI CAO (CHỐNG BỊA ĐẶT - ANTI-HALLUCINATION):
-1. BẠN PHẢI TÌM TRONG phần "DỮ LIỆU SẢN PHẨM" bên dưới để trả lời khách.
-2. TUYỆT ĐỐI KHÔNG bịa ra tên, giá tiền, hay đặc điểm sản phẩm nếu không có trong dữ liệu.
-3. NẾU KHÔNG CÓ DỮ LIỆU KHỚP: Xin lỗi duyên dáng là shop tạm hết mẫu này \
-và chủ động hỏi khách có muốn đổi sang phong cách khác không.
+QA_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SEARCH_SYSTEM_PROMPT),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ]
+)
 
-CÁCH TRÌNH BÀY (Mượt mà, tự nhiên, có xAI):
-- Mở đầu bằng một câu chào hoặc nhận xét nhẹ nhàng về gu của khách.
-- Khi giới thiệu sản phẩm, hãy lồng ghép thông tin khéo léo thành đoạn văn thay vì gạch đầu dòng khô khan.
-- Bắt buộc in đậm **Tên Sản Phẩm** và kèm (Mã SP: [MÃ_SP]) - [Giá] VNĐ.
-- xAI (GIẢI THÍCH LÝ DO - BẮT BUỘC): Sau mỗi sản phẩm, THÊM 1 câu giải thích ngắn \
-tại sao sản phẩm này phù hợp với yêu cầu của khách (dựa vào màu sắc, chất liệu, dịp mặc, hoặc vóc dáng).
-- Nếu có ẢNH trong dữ liệu: đính kèm ảnh đầu tiên theo format ![ảnh](URL_ẢNH) để khách xem trực quan.
-- Trả lời súc tích, không vượt quá 300 từ.
+contextualize_q_prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "Nhiệm vụ của bạn là VIẾT LẠI CÂU HỎI.\n"
+            "Dựa vào lịch sử trò chuyện, hãy làm rõ nghĩa của câu hỏi mới nhất "
+            "để nó có thể đứng độc lập mà ai đọc cũng hiểu được.\n\n"
+            "QUY TẮC SỐNG CÒN:\n"
+            "- TUYỆT ĐỐI KHÔNG TRẢ LỜI CÂU HỎI CỦA KHÁCH.\n"
+            "- CHỈ IN RA DUY NHẤT CÂU HỎI ĐÃ ĐƯỢC VIẾT LẠI. Không giải thích, không dạ thưa.\n"
+            "- Nếu câu hỏi đã quá rõ ràng rồi, hãy in lại y nguyên câu đó.\n\n"
+            "VÍ DỤ:\n"
+            "Khách: \"Có màu khác không?\" -> CHỈ IN RA: \"Áo thun đỏ ở trên có màu khác không?\"",
+        ),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ]
+)
 
-DỮ LIỆU SẢN PHẨM:
-{context}\
-"""
-
-QA_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", _SEARCH_SYSTEM_PROMPT),
-    MessagesPlaceholder("chat_history"),
-    ("human", "{input}"),
-])
-
-# ── Contextualize Question Prompt ─────────────────────────────────────────────
-_CONTEXTUALIZE_SYSTEM = """\
-Nhiệm vụ của bạn là NGƯỜI VIẾT LẠI CÂU HỎI.
-Dựa vào lịch sử trò chuyện, hãy làm rõ nghĩa của câu hỏi mới nhất để nó có thể \
-đứng độc lập mà ai đọc cũng hiểu được.
-
-QUY TẮC SỐNG CÒN:
-- TUYỆT ĐỐI KHÔNG TRẢ LỜI CÂU HỎI CỦA KHÁCH.
-- CHỈ IN RA DUY NHẤT CÂU HỎI ĐÃ ĐƯỢC VIẾT LẠI. Không giải thích, không dạ thưa.
-- Nếu câu hỏi đã quá rõ ràng rồi, hãy in lại y nguyên.
-
-VÍ DỤ: Khách: "Có màu khác không?" -> CHỈ IN RA: "Áo thun đỏ ở trên có màu khác không?"\
-"""
-
-contextualize_q_prompt = ChatPromptTemplate.from_messages([
-    ("system", _CONTEXTUALIZE_SYSTEM),
-    MessagesPlaceholder("chat_history"),
-    ("human", "{input}"),
-])
-
-# ── Document Prompt ───────────────────────────────────────────────────────────
 doc_prompt = PromptTemplate.from_template(
     "\n[MÃ_SP: {product_id}]"
-    "\nẢNH: {images}"
+    "\nIMAGE_URL: {image_url}"
     "\nTHÔNG TIN CHI TIẾT: {page_content}\n"
 )
 
-# ── Outfit Stylist Prompt ─────────────────────────────────────────────────────
-_OUTFIT_SYSTEM_PROMPT = """\
-Bạn là một chuyên gia tạo dáng (Personal Stylist) cực kỳ chuyên nghiệp và tâm lý.
 
-NHIỆM VỤ: Dựa vào "CÔNG THỨC PHỐI ĐỒ" và "SẢN PHẨM GỢI Ý" bên dưới, \
-hãy "hô biến" một bộ outfit hoàn hảo cho khách hàng.
+def format_documents_for_llm(docs: list[Document]) -> str:
+    """Format retrieved product docs into the strict product context schema."""
+    lines = []
+    for doc in docs:
+        doc = normalize_product_metadata(doc)
+        lines.append(
+            doc_prompt.format(
+                product_id=doc.metadata.get("product_id", "N/A"),
+                image_url=doc.metadata.get("image_url", ""),
+                page_content=doc.page_content,
+            )
+        )
+    return "\n".join(lines)
 
-QUY TẮC:
-1. Khéo léo xâu chuỗi các món đồ thành một bức tranh tổng thể.
-2. TUYỆT ĐỐI không giới thiệu đồ ngoài danh sách "SẢN PHẨM GỢI Ý". Không tự bịa thêm đồ.
-3. Nhớ in đậm **Tên Sản Phẩm**, kèm (Mã SP: [MÃ_SP]) và [Giá] VNĐ ở mỗi món.
-4. xAI - TÍNH MINH BẠCH (BẮT BUỘC): ở mỗi món đồ, BẠN PHẢI GIẢI THÍCH TẠI SAO \
-món này phù hợp (dựa vào vóc dáng, tone da, hoặc lý do có trong công thức).
-5. Nếu có ẢNH trong dữ liệu sản phẩm: đính kèm ![ảnh](URL_ẢNH) để khách xem trực quan.
-6. Giọng điệu nịnh khách, sang trọng nhưng gần gũi. Lồng ghép thành các đoạn văn \
-mượt mà, tránh dùng gạch đầu dòng liệt kê như hóa đơn.
-7. Kết thúc bằng 1 câu chốt sale/hỏi han thân thiện. Giới hạn 350 từ.
 
-{outfit_context}\
-"""
+OUTFIT_SYSTEM_PROMPT = (
+    "Bạn là chuyên gia tạo dáng (Personal Stylist) chuyên nghiệp và tâm lý.\n\n"
+    "NHIỆM VỤ: Dựa vào \"CÔNG THỨC PHỐI ĐỒ\" và \"SẢN PHẨM GỢI Ý\" bên dưới, "
+    "tạo một outfit hoàn chỉnh cho khách.\n\n"
+    "QUY TẮC:\n"
+    "1. Chỉ giới thiệu sản phẩm có trong \"SẢN PHẨM GỢI Ý\". Không thêm món ngoài context.\n"
+    "2. Tối đa 3 sản phẩm, không vượt quá 400 từ.\n"
+    "3. Trước khi trả lời, tự kiểm tra sự hài hòa màu sắc, bối cảnh sử dụng và vóc dáng/tone da nếu có.\n"
+    "4. Kết thúc bằng đúng 1 câu hỏi gợi mở để tiếp tục tư vấn.\n\n"
+    "SCHEMA BẮT BUỘC:\n"
+    "Mình phối cho bạn một set như sau:\n\n"
+    "1. **Tên sản phẩm**\n"
+    "- Mã SP: [MÃ_SP]\n"
+    "- Giá: [GIÁ] VND\n"
+    "- Đặc điểm: [màu/chất liệu/kiểu dáng nổi bật]\n"
+    "- Lý do phù hợp: [1 câu ngắn, gắn với công thức phối đồ]\n"
+    "- Ảnh: ![Sản phẩm]([IMAGE_URL])\n\n"
+    "Nếu không có ảnh, ghi: \"Ảnh: Chưa có ảnh\".\n\n"
+    "{outfit_context}"
+)
 
-outfit_prompt = ChatPromptTemplate.from_messages([
-    ("system", _OUTFIT_SYSTEM_PROMPT),
-    MessagesPlaceholder("chat_history"),
-    ("human", "{input}"),
-])
+outfit_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", OUTFIT_SYSTEM_PROMPT),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ]
+)
 
-# ── Summarize Prompt ──────────────────────────────────────────────────────────
-SUMMARIZE_PROMPT = """\
-Tóm tắt cuộc hội thoại mua sắm thời trang sau thành 3-5 câu ngắn.
-Giữ lại: sản phẩm đã hỏi, phong cách khách thích, thông tin vóc dáng/tone da (nếu có).
-Bỏ qua: lời chào, câu xã giao.
-Chỉ trả về đoạn tóm tắt, không thêm gì khác.
-
-Hội thoại:
-{history_text}\
-"""
-
-# ── Intent Classify Prompt ────────────────────────────────────────────────────
-INTENT_CLASSIFY_PROMPT = """\
-Bạn là bộ phân loại intent cho chatbot tư vấn thời trang.
-Phân loại câu hỏi vào đúng 1 trong 4 nhóm:
-OUTFIT   → Hỏi cách phối đồ, mix-match, tư vấn mặc gì cho dịp/vóc dáng/phong cách
-SEARCH   → Tìm sản phẩm cụ thể, hỏi giá, còn hàng, so sánh, xem ảnh sản phẩm
-CHITCHAT → Cảm ơn, tạm biệt, hỏi thăm, câu xã giao không liên quan mua sắm
-GREETING → Chào hỏi, bắt đầu cuộc trò chuyện
-{context_block}
-Câu cần phân loại: "{query}"
-Chỉ trả lời đúng 1 từ: OUTFIT / SEARCH / CHITCHAT / GREETING\
-"""
+SUMMARIZE_PROMPT = (
+    "Tóm tắt cuộc hội thoại mua sắm thời trang sau thành 3-5 câu ngắn.\n"
+    "Giữ lại: sản phẩm đã hỏi, phong cách khách thích, thông tin vóc dáng/tone da (nếu có).\n"
+    "Bỏ qua: lời chào, câu xã giao.\n"
+    "Chỉ trả về đoạn tóm tắt, không thêm gì khác.\n\n"
+    "Hội thoại:\n"
+    "{history_text}"
+)
