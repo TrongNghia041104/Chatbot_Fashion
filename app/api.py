@@ -370,9 +370,11 @@ async def chat(
                     chain_type = "llm"
 
             if intent == "search":
-                from app.core.chains import get_full_chat_chain
+                # Use fast chain: active_query is already rewritten by the keyword router /
+                # LLM router (decision.rewrite_query), so we skip the extra LLM rewrite step.
+                from app.core.chains import get_fast_search_chain
 
-                chain = get_full_chat_chain()
+                chain = get_fast_search_chain()
                 chain_input = {"input": active_query}
                 chain_type = "search"
 
@@ -436,11 +438,16 @@ async def chat(
             append_chat_turn_log(
                 {
                     "session_id": session_id,
+                    "raw_query": message or "",
                     "query": active_query,
                     "route": decision.route,
                     "action": decision.action,
                     "intent": intent,
                     "source": decision.source,
+                    "route_confidence": decision.confidence,
+                    "route_reason": decision.reason,
+                    "retrieved_count": len(retrieved_docs) if retrieved_docs else len(allowed_product_ids),
+                    "retrieved_product_ids": sorted(allowed_product_ids),
                     "ttft_sec": round(first_token_time - start_time, 4),
                     "total_sec": round(end_time - start_time, 4),
                     "reranker_enabled": _is_reranker_enabled(),

@@ -14,6 +14,7 @@ from app.core.vector_store import get_product_retriever
 
 
 _full_chat_chain = None
+_fast_search_chain = None
 _product_answer_chain = None
 _outfit_chain = None
 _chain_lock = Lock()
@@ -44,6 +45,35 @@ def get_full_chat_chain():
                     output_messages_key="answer",
                 )
     return _full_chat_chain
+
+
+def get_fast_search_chain():
+    """Fast text-search RAG chain: retrieve with pre-rewritten query -> answer.
+
+    Skips the LLM-based history-aware query rewrite step entirely.
+    The caller is expected to pass ``input=decision.rewrite_query`` which has
+    already been cleaned by the keyword router or a single lightweight LLM call.
+    This eliminates one full LLM round-trip (~3-8 s) per search request.
+    """
+    global _fast_search_chain
+    if _fast_search_chain is None:
+        with _chain_lock:
+            if _fast_search_chain is None:
+                document_chain = create_stuff_documents_chain(
+                    llm=llm,
+                    prompt=QA_PROMPT,
+                    document_prompt=doc_prompt,
+                )
+                # Plain retriever — no LLM rewrite; uses `input` directly as search query.
+                rag_chain = create_retrieval_chain(get_product_retriever(), document_chain)
+                _fast_search_chain = RunnableWithMessageHistory(
+                    rag_chain,
+                    get_message_history,
+                    input_messages_key="input",
+                    history_messages_key="chat_history",
+                    output_messages_key="answer",
+                )
+    return _fast_search_chain
 
 
 def get_product_answer_chain():

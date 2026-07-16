@@ -154,7 +154,8 @@ class ViFashionCLIPTextEmbeddings(Embeddings):
             param.requires_grad = False
 
         self.embedding_dim = teacher_dim
-        print(f"[OK] ViFashionCLIP loaded: {self.checkpoint_path}")
+        # Use .name to avoid UnicodeEncodeError on Windows consoles when the path has Vietnamese characters
+        print(f"[OK] ViFashionCLIP loaded: {self.checkpoint_path.name}")
         print(f"     Device: {self.device} | Dim: {self.embedding_dim}")
 
     @torch.no_grad()
@@ -181,7 +182,15 @@ class ViFashionCLIPTextEmbeddings(Embeddings):
         return self._encode(texts)
 
     def embed_query(self, text: str) -> list[float]:
-        return self._encode([text])[0]
+        """Return cached embedding if available, otherwise encode and cache."""
+        if text in _embed_query_cache:
+            return _embed_query_cache[text]
+        result = self._encode([text])[0]
+        with _cache_lock:
+            if len(_embed_query_cache) >= _EMBED_CACHE_MAX:
+                _embed_query_cache.pop(next(iter(_embed_query_cache)))
+            _embed_query_cache[text] = result
+        return result
 
 
 class RemoteViFashionCLIPTextEmbeddings(Embeddings):
@@ -228,7 +237,15 @@ class RemoteViFashionCLIPTextEmbeddings(Embeddings):
         return all_vectors
 
     def embed_query(self, text: str) -> list[float]:
-        return self._embed_batch([text])[0]
+        """Return cached embedding if available, otherwise call remote service and cache."""
+        if text in _embed_query_cache:
+            return _embed_query_cache[text]
+        result = self._embed_batch([text])[0]
+        with _cache_lock:
+            if len(_embed_query_cache) >= _EMBED_CACHE_MAX:
+                _embed_query_cache.pop(next(iter(_embed_query_cache)))
+            _embed_query_cache[text] = result
+        return result
 
     def health(self) -> dict:
         response = self._session.get(f"{self.service_url}/health", timeout=min(self.timeout, 10))
@@ -240,6 +257,35 @@ _rule_embeddings: BGEM3Embeddings | None = None
 _product_embeddings: Embeddings | None = None
 _local_product_embeddings: ViFashionCLIPTextEmbeddings | None = None
 _embedding_lock = Lock()
+
+# Simple in-memory cache for embed_query — avoids redundant HTTP calls / GPU runs
+# for the same (rewritten) query within a session or across concurrent sessions.
+_embed_query_cache: dict[str, list[float]] = {}
+_EMBED_CACHE_MAX = 256
+_cache_lock = Lock()
+
+
+def _cached_embed_query(embedder: Embeddings, text: str) -> list[float]:
+    """Return cached embedding or compute and store it."""
+    if text in _embed_query_cache:
+        return _embed_query_cache[text]
+    result = embedder.embed_query.__wrapped__(embedder, text) if hasattr(embedder.embed_query, "__wrapped__") else _raw_embed_query(embedder, text)
+    with _cache_lock:
+        if len(_embed_query_cache) >= _EMBED_CACHE_MAX:
+            # Evict oldest entry (insertion-order dict, Python 3.7+)
+            _embed_query_cache.pop(next(iter(_embed_query_cache)))
+        _embed_query_cache[text] = result
+    return result
+
+
+def _raw_embed_query(embedder: Embeddings, text: str) -> list[float]:
+    """Call the underlying embed without cache (used by _cached_embed_query)."""
+    if isinstance(embedder, RemoteViFashionCLIPTextEmbeddings):
+        return embedder._embed_batch([text])[0]
+    if isinstance(embedder, ViFashionCLIPTextEmbeddings):
+        return embedder._encode([text])[0]
+    # Fallback for BGEM3 or unknown
+    return embedder.embed_query(text)
 
 
 def get_rule_embeddings() -> BGEM3Embeddings:

@@ -16,8 +16,9 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 STYLISTS_DIR = os.path.join(DATA_DIR, "stylists")
 METADATA_DIR = os.path.join(DATA_DIR, "metadata")
 STATIC_DIR = os.path.join(BASE_DIR, "app", "static")
-IMAGES_DIR = os.path.join(BASE_DIR, "images")
-PRODUCT_IMAGE_ROOT = IMAGES_DIR
+# IMAGES_DIR = os.path.join(BASE_DIR, "images")
+# PRODUCT_IMAGE_ROOT = IMAGES_DIR
+PRODUCT_IMAGE_ROOT = "D:/KHÓA LUẬN/WORKSPACE/Amazon_Lazada_Fashion_Metadata_65k/images"
 
 METADATA_FILE = os.path.join(METADATA_DIR, "meta_Amazon_Lazada_Fashion_65k.jsonl")
 LAYER_B_FEMALE_PATH = os.path.join(STYLISTS_DIR, "Layer_B_Female_Knowledge.json")
@@ -50,6 +51,7 @@ PROJECTION_DROPOUT = 0.05
 PRODUCT_EMBEDDING_BATCH_SIZE = 32
 IMAGE_EMBEDDING_BATCH_SIZE = 32
 PRODUCT_EMBEDDING_BACKEND = os.getenv("PRODUCT_EMBEDDING_BACKEND", "remote").lower()
+# PRODUCT_EMBEDDING_BACKEND = "local"
 VIFASHIONCLIP_SERVICE_URL = os.getenv("VIFASHIONCLIP_SERVICE_URL", "http://localhost:18080")
 VIFASHIONCLIP_SERVICE_TIMEOUT = float(os.getenv("VIFASHIONCLIP_SERVICE_TIMEOUT", "120"))
 REMOTE_EMBEDDING_FALLBACK_LOCAL = os.getenv("REMOTE_EMBEDDING_FALLBACK_LOCAL", "false").lower() in {
@@ -64,7 +66,7 @@ REMOTE_EMBEDDING_FALLBACK_LOCAL = os.getenv("REMOTE_EMBEDDING_FALLBACK_LOCAL", "
 LLM_TEMPERATURE = 0.4
 LLM_TIMEOUT = 120
 LLM_NUM_PREDICT = 1024
-LLM_NUM_CTX = 8192
+LLM_NUM_CTX = 4096  # Reduced from 8192 to cut prefill latency (~30% faster TTFT)
 
 
 # Qdrant
@@ -79,7 +81,7 @@ LAYER_B_VECTOR_SIZE = 1024
 
 
 # Retrieval
-PRODUCT_SEARCH_CANDIDATE_K = 30
+PRODUCT_SEARCH_CANDIDATE_K = 15
 PRODUCT_SEARCH_PAGE_SIZE = 5
 PRODUCT_SEARCH_BRAND_LIMIT = 2
 ENABLE_PRODUCT_RERANKER = os.getenv("ENABLE_PRODUCT_RERANKER", "false").lower() in {
@@ -89,7 +91,7 @@ ENABLE_PRODUCT_RERANKER = os.getenv("ENABLE_PRODUCT_RERANKER", "false").lower() 
     "on",
 }
 RERANKER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
-RERANKER_TOP_N = 15
+RERANKER_TOP_N = 8
 RERANKER_BATCH_SIZE = 8
 RETRIEVAL_RETRY_COUNT = 2
 RETRIEVAL_RETRY_SLEEP = 1.0
@@ -163,6 +165,17 @@ DEFINITE_OUTFIT = [
     "outfit cho",
     "gợi ý outfit",
     "tư vấn phối",
+    # Expanded to reduce LLM router fallback
+    "nên mặc gì",
+    "mặc gì",
+    "mặc đồ gì",
+    "chọn đồ",
+    "ăn mặc thế nào",
+    "mặc như thế nào",
+    "diện gì",
+    "trang phục gì",
+    "mặc gì cho",
+    "mặc gì đi",
 ]
 DEFINITE_SEARCH = [
     "còn hàng không",

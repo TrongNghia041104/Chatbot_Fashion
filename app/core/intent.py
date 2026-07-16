@@ -142,6 +142,31 @@ OCCASION_KEYWORDS = [
     "thoi tiet lanh",
 ]
 
+COLOR_ACCENTED_WORDS = {
+    "den": ["đen"],
+    "trang": ["trắng"],
+    "do": ["đỏ"],
+    "hong": ["hồng"],
+    "nau": ["nâu"],
+    "xam": ["xám"],
+    "vang": ["vàng"],
+    "tim": ["tím"],
+    "bac": ["bạc"],
+}
+COLOR_CONTEXT_WORDS = [
+    "mau",
+    "tone",
+    "ao",
+    "quan",
+    "vay",
+    "dam",
+    "giay",
+    "dep",
+    "tui",
+    "non",
+    "kinh",
+]
+
 
 def strip_vietnamese_accents(text: str) -> str:
     text = unicodedata.normalize("NFD", text or "")
@@ -166,6 +191,34 @@ def keyword_hit(query: str, keywords: list[str]) -> bool:
         if kw_norm and (kw_norm in q_norm or kw_plain in q_plain):
             return True
     return False
+
+
+def word_hit(text: str, keyword: str) -> bool:
+    return bool(re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text))
+
+
+def extract_color_entities(query: str) -> list[str]:
+    """Extract color words without confusing search verbs like 'tìm' with 'tím'."""
+    q_norm = normalize_text(query)
+    q_plain = plain_text(query)
+    colors = []
+
+    for color in COLOR_KEYWORDS:
+        color_plain = plain_text(color)
+        accented_words = COLOR_ACCENTED_WORDS.get(color_plain, [])
+        has_accented_hit = any(word_hit(q_norm, word) for word in accented_words)
+        has_contextual_plain_hit = any(
+            re.search(rf"(?<!\w){context}\s+{re.escape(color_plain)}(?!\w)", q_plain)
+            for context in COLOR_CONTEXT_WORDS
+        )
+        has_modifier_hit = re.search(
+            rf"(?<!\w){re.escape(color_plain)}\s+(pastel|dam|nhat|than|dong)(?!\w)",
+            q_plain,
+        )
+        if has_accented_hit or has_contextual_plain_hit or has_modifier_hit:
+            colors.append(color)
+
+    return colors
 
 
 def strict_out_of_scope_hit(query: str) -> bool:
@@ -196,7 +249,7 @@ def infer_product_action(query: str) -> str:
 def extract_basic_entities(query: str) -> dict:
     q = plain_text(query)
     entities = {}
-    colors = [color for color in COLOR_KEYWORDS if color in q]
+    colors = extract_color_entities(query)
     if colors:
         entities["colors"] = colors
     categories = [cat for cat in CATEGORY_KEYWORDS if cat in q]
@@ -292,6 +345,18 @@ def route_from_keywords(query: str, state: dict | None = None) -> RouteDecision 
             reason="Matched high-precision product-search keyword.",
             source="keyword",
         )
+    # Heuristic: query mentions a clothing category → almost always product search.
+    # This avoids calling the LLM router for common queries like "áo thún màu đen" or "váy đi tiệc".
+    if keyword_hit(query, CATEGORY_KEYWORDS):
+        return RouteDecision(
+            route=ROUTE_PRODUCT_SEARCH,
+            action=infer_product_action(query),
+            confidence=0.85,
+            rewrite_query=query,
+            entities=extract_basic_entities(query),
+            reason="Clothing category keyword heuristic → product search (no LLM needed).",
+            source="keyword_heuristic",
+        )
     return None
 
 
@@ -344,7 +409,7 @@ def classify_route_llm(query: str, last_bot_msg: str = "") -> RouteDecision:
                     "content": ROUTE_CLASSIFY_PROMPT.format(query=query, context_block=context_block),
                 }
             ],
-            options={"temperature": 0, "num_predict": 220},
+            options={"temperature": 0, "num_predict": 80},  # Reduced from 220 — JSON route is short
             format="json",
         )
         raw = response["message"]["content"].strip()
