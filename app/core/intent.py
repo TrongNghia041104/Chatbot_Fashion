@@ -1,11 +1,22 @@
-"""Structured request routing for the Fashion RAG chatbot."""
+"""Intent understanding and deterministic route resolution for the chatbot.
+
+The central design rule is intentionally simple:
+
+    intent = what the user wants
+    modality = what input they supplied
+    action = the operation inside that intent
+    route = the execution pipeline derived by Python policy
+
+The LLM may classify ambiguous language, but it never invents or directly
+selects an execution route.
+"""
 
 from __future__ import annotations
 
 import json
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 import ollama
 
@@ -16,179 +27,190 @@ from app.config import (
     DEFINITE_PROFILE_INQUIRY,
     DEFINITE_SEARCH,
     FOLLOWUP_MORE_KEYWORDS,
+    IMAGE_ROUTER_CONFIDENCE_THRESHOLD,
+    LAYER_B_DANG_NGUOI,
+    LAYER_B_TONE_DA,
     LLM_MODEL,
     MALE_KEYWORDS,
+    OLLAMA_BASE_URL,
     STRICT_OUT_OF_SCOPE_PATTERNS,
 )
 
 
-ROUTE_PRODUCT_SEARCH = "product_search"
-ROUTE_IMAGE_PRODUCT_SEARCH = "image_product_search"
-ROUTE_OUTFIT_ADVICE = "outfit_advice"
-ROUTE_PROFILE_INQUIRY = "profile_inquiry"
-ROUTE_OUT_OF_SCOPE = "out_of_scope"
-ROUTE_GREETING = "greeting"
-ROUTE_CHITCHAT = "chitchat"
-ROUTE_CLARIFY = "clarify"
+# ---------------------------------------------------------------------------
+# Stable business intents
+# ---------------------------------------------------------------------------
+INTENT_PRODUCT_DISCOVERY = "product_discovery"
+INTENT_OUTFIT_ADVICE = "outfit_advice"
+INTENT_PROFILE_ANALYSIS = "profile_analysis"
+INTENT_PROFILE_MANAGEMENT = "profile_management"
+INTENT_SOCIAL = "social"
+INTENT_OUT_OF_SCOPE = "out_of_scope"
+INTENT_UNKNOWN = "unknown"  # control result, not a business intent
 
-ROUTE_TO_INTENT = {
-    ROUTE_PRODUCT_SEARCH: "search",
-    ROUTE_IMAGE_PRODUCT_SEARCH: "image_search",
-    ROUTE_OUTFIT_ADVICE: "outfit",
-    ROUTE_PROFILE_INQUIRY: "profile_inquiry",
-    ROUTE_OUT_OF_SCOPE: "out_of_scope",
-    ROUTE_GREETING: "greeting",
-    ROUTE_CHITCHAT: "chitchat",
-    ROUTE_CLARIFY: "clarify",
+BUSINESS_INTENTS = {
+    INTENT_PRODUCT_DISCOVERY,
+    INTENT_OUTFIT_ADVICE,
+    INTENT_PROFILE_ANALYSIS,
+    INTENT_PROFILE_MANAGEMENT,
+    INTENT_SOCIAL,
+    INTENT_OUT_OF_SCOPE,
 }
 
-ROUTE_CLASSIFY_PROMPT = (
-    "You are the router for a Vietnamese fashion shopping chatbot.\n"
-    "Pick exactly one route:\n"
-    "- product_search: find/view/compare products, ask price, size, stock, images.\n"
-    "- outfit_advice: styling/mix-match/what to wear for occasion, body shape, weather context.\n"
-    "- profile_inquiry: user asks what body shape, skin tone, gender, budget, size, or preferences the bot remembers.\n"
-    "- out_of_scope: clearly unrelated to fashion/shopping and cannot be gracefully redirected.\n"
-    "- greeting: short hello/start conversation.\n"
-    "- chitchat: thanks, goodbye, social message.\n"
-    "- clarify: too vague and previous context is not enough.\n\n"
-    "Important rules:\n"
-    "- If a query mentions weather but asks what to wear, choose outfit_advice, not out_of_scope.\n"
-    "- If a query asks 'con size L khong' choose product_search with action=size_check, but note actual stock may be unknown.\n"
-    "- If user says 'xem them' and previous context exists, state resolver handles it before this prompt.\n"
-    "- Be strict with out_of_scope, but friendly: only choose it when no fashion redirection is natural.\n\n"
-    "Last bot message/context: {context_block}\n"
-    "User query: {query}\n\n"
-    "Return exactly one compact JSON object, no markdown, with this schema:\n"
-    "{{\"route\":\"product_search|outfit_advice|profile_inquiry|out_of_scope|greeting|chitchat|clarify\","
-    "\"action\":\"search|more|mix_match|size_check|price_check|answer|redirect|clarify\","
-    "\"confidence\":0.0,"
-    "\"rewrite_query\":\"short retrieval-ready query\","
-    "\"entities\":{{}},"
-    "\"missing_slots\":[],"
-    "\"reason\":\"short reason\"}}"
-)
+# Input modality is orthogonal to intent.
+MODALITY_TEXT = "text"
+MODALITY_IMAGE = "image"
+MODALITY_TEXT_IMAGE = "text_image"
+
+# Execution routes. Only resolve_route() chooses these values.
+ROUTE_TEXT_PRODUCT_SEARCH = "text_product_search"
+ROUTE_IMAGE_PRODUCT_SEARCH = "image_product_search"
+ROUTE_TEXT_OUTFIT_ADVICE = "text_outfit_advice"
+ROUTE_IMAGE_OUTFIT_ADVICE = "image_outfit_advice"
+ROUTE_PROFILE_VLM_ANALYSIS = "profile_vlm_analysis"
+ROUTE_PROFILE_STATE_HANDLER = "profile_state_handler"
+ROUTE_SOCIAL_RESPONSE = "social_response"
+ROUTE_OUT_OF_SCOPE_REDIRECT = "out_of_scope_redirect"
+
+EXECUTION_ROUTES = {
+    ROUTE_TEXT_PRODUCT_SEARCH,
+    ROUTE_IMAGE_PRODUCT_SEARCH,
+    ROUTE_TEXT_OUTFIT_ADVICE,
+    ROUTE_IMAGE_OUTFIT_ADVICE,
+    ROUTE_PROFILE_VLM_ANALYSIS,
+    ROUTE_PROFILE_STATE_HANDLER,
+    ROUTE_SOCIAL_RESPONSE,
+    ROUTE_OUT_OF_SCOPE_REDIRECT,
+}
+
+# Compatibility aliases for older callers. New code should use the explicit
+# route names above. They point to the same pipeline rather than duplicating it.
+ROUTE_PRODUCT_SEARCH = ROUTE_TEXT_PRODUCT_SEARCH
+ROUTE_OUTFIT_ADVICE = ROUTE_TEXT_OUTFIT_ADVICE
+ROUTE_PROFILE_INQUIRY = ROUTE_PROFILE_STATE_HANDLER
+ROUTE_OUT_OF_SCOPE = ROUTE_OUT_OF_SCOPE_REDIRECT
+ROUTE_GREETING = ROUTE_SOCIAL_RESPONSE
+ROUTE_CHITCHAT = ROUTE_SOCIAL_RESPONSE
+ROUTE_CLARIFY = "clarify"  # control label only; never returned as a route
+
+
+PRODUCT_ACTIONS = {
+    "search",
+    "find_similar",
+    "more",
+    "price_check",
+    "size_check",
+    "stock_check",
+    "compare",
+}
+OUTFIT_ACTIONS = {"create_outfit", "style_image_item", "refine_outfit"}
+PROFILE_ANALYSIS_ACTIONS = {
+    "analyze_body",
+    "analyze_skin_tone",
+    "analyze_full_profile",
+    "analyze_then_style",
+}
+PROFILE_MANAGEMENT_ACTIONS = {
+    "read",
+    "update",
+    "delete_field",
+    "clear_all",
+    "confirm_candidate",
+    "reject_candidate",
+}
+SOCIAL_ACTIONS = {"greeting", "thanks", "goodbye", "social"}
 
 
 @dataclass
-class RouteDecision:
-    """Structured routing result: stable route + expandable action/entities."""
+class IntentDecision:
+    """Structured semantic decision plus an execution route.
 
-    route: str
-    action: str = "answer"
+    `trace` contains short operational stages for debugging. It deliberately
+    avoids hidden chain-of-thought and stores only observable policy outcomes.
+    """
+
+    intent: str
+    modality: str = MODALITY_TEXT
+    action: str = "search"
+    route: str | None = None
     confidence: float = 0.0
     rewrite_query: str = ""
     entities: dict = field(default_factory=dict)
-    missing_slots: list = field(default_factory=list)
+    image_context: dict = field(default_factory=dict)
+    missing_slots: list[str] = field(default_factory=list)
+    needs_clarification: bool = False
+    clarification_question: str = ""
+    clarification_options: list[dict] = field(default_factory=list)
+    follow_up_question: str = ""
+    follow_up_options: list[dict] = field(default_factory=list)
+    workflow: list[str] = field(default_factory=list)
     reason: str = ""
     source: str = "router"
+    trace: list[dict] = field(default_factory=list)
 
     @property
-    def intent(self) -> str:
-        return ROUTE_TO_INTENT.get(self.route, "search")
+    def handler(self) -> str:
+        """Compatibility execution kind used by the existing chat loop."""
+        if self.needs_clarification or not self.route:
+            return "clarify"
+        if self.route == ROUTE_TEXT_PRODUCT_SEARCH:
+            return "search"
+        if self.route == ROUTE_IMAGE_PRODUCT_SEARCH:
+            return "image_search"
+        if self.route in {ROUTE_TEXT_OUTFIT_ADVICE, ROUTE_IMAGE_OUTFIT_ADVICE}:
+            return "outfit"
+        if self.route == ROUTE_PROFILE_VLM_ANALYSIS:
+            return "profile_analysis"
+        if self.route == ROUTE_PROFILE_STATE_HANDLER:
+            return "profile_management"
+        if self.route == ROUTE_SOCIAL_RESPONSE:
+            return "social"
+        if self.route == ROUTE_OUT_OF_SCOPE_REDIRECT:
+            return "out_of_scope"
+        return "clarify"
+
+    @property
+    def legacy_intent(self) -> str:
+        """Old short intent name retained only for external compatibility."""
+        return self.handler
+
+    def to_debug_dict(self) -> dict:
+        data = asdict(self)
+        data["handler"] = self.handler
+        return data
 
 
-CONTINUABLE_ROUTES = {ROUTE_PRODUCT_SEARCH, ROUTE_IMAGE_PRODUCT_SEARCH, ROUTE_OUTFIT_ADVICE}
+# Older imports continue to work while notebooks migrate to IntentDecision.
+RouteDecision = IntentDecision
 
-COLOR_KEYWORDS = [
-    "den",
-    "trang",
-    "xanh",
-    "do",
-    "hong",
-    "be",
-    "kem",
-    "nau",
-    "xam",
-    "ghi",
-    "vang",
-    "tim",
-    "cam",
-    "bac",
-    "vang dong",
-]
-CATEGORY_KEYWORDS = [
-    "ao thun",
-    "ao so mi",
-    "so mi",
-    "ao khoac",
-    "ao len",
-    "ao",
-    "quan jean",
-    "quan dai",
-    "quan short",
-    "quan",
-    "chan vay",
-    "vay",
-    "dam",
-    "jumpsuit",
-    "giay",
-    "dep",
-    "tui xach",
-    "phu kien",
-]
-OCCASION_KEYWORDS = [
-    "di lam",
-    "di hoc",
-    "di tiec",
-    "di choi",
-    "di bien",
-    "hen ho",
-    "du lich",
-    "cong so",
-    "hang ngay",
-    "du dam cuoi",
-    "troi lanh",
-    "thoi tiet lanh",
-]
 
-COLOR_ACCENTED_WORDS = {
-    "den": ["đen"],
-    "trang": ["trắng"],
-    "do": ["đỏ"],
-    "hong": ["hồng"],
-    "nau": ["nâu"],
-    "xam": ["xám"],
-    "vang": ["vàng"],
-    "tim": ["tím"],
-    "bac": ["bạc"],
-}
-COLOR_CONTEXT_WORDS = [
-    "mau",
-    "tone",
-    "ao",
-    "quan",
-    "vay",
-    "dam",
-    "giay",
-    "dep",
-    "tui",
-    "non",
-    "kinh",
-]
+def _trace(stage: str, result: str, detail: str = "") -> dict:
+    return {"stage": stage, "result": result, "detail": detail}
 
 
 def strip_vietnamese_accents(text: str) -> str:
-    text = unicodedata.normalize("NFD", text or "")
-    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    text = unicodedata.normalize("NFD", str(text or ""))
+    text = "".join(char for char in text if unicodedata.category(char) != "Mn")
     return text.replace("đ", "d").replace("Đ", "D")
 
 
 def normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "").lower()).strip()
+    return re.sub(r"\s+", " ", str(text or "").lower()).strip()
 
 
 def plain_text(text: str) -> str:
     return normalize_text(strip_vietnamese_accents(text))
 
 
-def keyword_hit(query: str, keywords: list[str]) -> bool:
-    q_norm = normalize_text(query)
-    q_plain = plain_text(query)
+def keyword_hit(query: str, keywords: list[str] | tuple[str, ...]) -> bool:
+    query_normalized = normalize_text(query)
+    query_plain = plain_text(query)
     for keyword in keywords:
-        kw_norm = normalize_text(keyword)
-        kw_plain = plain_text(keyword)
-        if kw_norm and (kw_norm in q_norm or kw_plain in q_plain):
+        keyword_normalized = normalize_text(keyword)
+        keyword_plain = plain_text(keyword)
+        if keyword_normalized and (
+            keyword_normalized in query_normalized or keyword_plain in query_plain
+        ):
             return True
     return False
 
@@ -197,245 +219,813 @@ def word_hit(text: str, keyword: str) -> bool:
     return bool(re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text))
 
 
-def extract_color_entities(query: str) -> list[str]:
-    """Extract color words without confusing search verbs like 'tìm' with 'tím'."""
-    q_norm = normalize_text(query)
-    q_plain = plain_text(query)
-    colors = []
+COLOR_KEYWORDS = [
+    "den", "trang", "xanh", "do", "hong", "be", "kem", "nau", "xam",
+    "ghi", "vang", "tim", "cam", "bac", "vang dong",
+]
+CATEGORY_KEYWORDS = [
+    "ao thun", "ao so mi", "so mi", "ao khoac", "ao len", "ao",
+    "quan jean", "quan dai", "quan short", "quan", "chan vay", "vay",
+    "dam", "jumpsuit", "giay", "dep", "tui xach", "phu kien",
+]
+OCCASION_KEYWORDS = [
+    "di lam", "di hoc", "di tiec", "di choi", "di bien", "hen ho",
+    "du lich", "cong so", "hang ngay", "du dam cuoi", "troi lanh",
+    "thoi tiet lanh",
+]
+IMAGE_OUTFIT_KEYWORDS = [
+    "phoi", "phoi do", "phoi sao", "phoi nhu nao", "phoi the nao",
+    "phoi voi gi", "mac voi gi", "mac cung gi", "di voi gi", "hop voi gi",
+    "ket hop voi gi", "mix", "mix sao", "mix voi gi", "outfit",
+    "goi y do", "goi y outfit",
+]
+IMAGE_PROFILE_KEYWORDS = [
+    "dang nguoi", "body type", "tone da", "mau da", "phan tich nguoi",
+    "phan tich dang", "phan tich voc dang",
+]
+PROFILE_CONFIRM_KEYWORDS = [
+    "dong y", "xac nhan", "luu lai", "luu thong tin", "dung roi", "chinh xac",
+]
+PROFILE_REJECT_KEYWORDS = [
+    "khong luu", "khong dong y", "khong dung", "bo qua", "huy",
+]
+PROFILE_CLEAR_ALL_KEYWORDS = [
+    "xoa toan bo", "xoa het profile", "xoa het thong tin", "quen het thong tin",
+]
+PROFILE_DELETE_KEYWORDS = ["xoa", "bo", "quen", "khong luu"]
+SOCIAL_GOODBYE_KEYWORDS = ["tam biet", "hen gap lai", "bye", "bai bai"]
+SOCIAL_THANKS_KEYWORDS = ["cam on", "thank you", "thanks"]
+CANCEL_PENDING_IMAGE_KEYWORDS = ["khong can", "bo qua anh", "thoi khong"]
 
+COLOR_ACCENTED_WORDS = {
+    "den": ["đen"], "trang": ["trắng"], "do": ["đỏ"], "hong": ["hồng"],
+    "nau": ["nâu"], "xam": ["xám"], "vang": ["vàng"], "tim": ["tím"],
+    "bac": ["bạc"],
+}
+COLOR_CONTEXT_WORDS = [
+    "mau", "tone", "ao", "quan", "vay", "dam", "giay", "dep", "tui",
+    "non", "kinh",
+]
+
+
+def extract_color_entities(query: str) -> list[str]:
+    """Extract colors without confusing the verb `tìm` with the color `tím`."""
+    query_normalized = normalize_text(query)
+    query_plain = plain_text(query)
+    colors: list[str] = []
     for color in COLOR_KEYWORDS:
-        color_plain = plain_text(color)
-        accented_words = COLOR_ACCENTED_WORDS.get(color_plain, [])
-        has_accented_hit = any(word_hit(q_norm, word) for word in accented_words)
-        has_contextual_plain_hit = any(
-            re.search(rf"(?<!\w){context}\s+{re.escape(color_plain)}(?!\w)", q_plain)
+        accented_hit = any(
+            word_hit(query_normalized, word)
+            for word in COLOR_ACCENTED_WORDS.get(color, [])
+        )
+        contextual_hit = any(
+            re.search(rf"(?<!\w){context}\s+{re.escape(color)}(?!\w)", query_plain)
             for context in COLOR_CONTEXT_WORDS
         )
-        has_modifier_hit = re.search(
-            rf"(?<!\w){re.escape(color_plain)}\s+(pastel|dam|nhat|than|dong)(?!\w)",
-            q_plain,
+        modifier_hit = re.search(
+            rf"(?<!\w){re.escape(color)}\s+(pastel|dam|nhat|than|dong)(?!\w)",
+            query_plain,
         )
-        if has_accented_hit or has_contextual_plain_hit or has_modifier_hit:
+        if accented_hit or contextual_hit or modifier_hit:
             colors.append(color)
-
     return colors
 
 
-def strict_out_of_scope_hit(query: str) -> bool:
-    q_plain = plain_text(query)
-    return any(re.search(pattern, q_plain) for pattern in STRICT_OUT_OF_SCOPE_PATTERNS)
-
-
-def is_more_request(query: str) -> bool:
-    q_plain = plain_text(query)
-    return any(plain_text(keyword) in q_plain for keyword in FOLLOWUP_MORE_KEYWORDS)
-
-
-def infer_product_action(query: str) -> str:
-    q = plain_text(query)
-    if is_more_request(query):
-        return "more"
-    if "size" in q or "kich co" in q or re.search(r"\b(xs|s|m|l|xl|xxl|xxxl)\b", q):
-        return "size_check"
-    if any(keyword in q for keyword in ["gia", "bao nhieu", "duoi", "tren", "re hon", "dat hon"]):
-        return "price_check"
-    if any(keyword in q for keyword in ["con hang", "het hang", "ton kho"]):
-        return "stock_check"
-    if any(keyword in q for keyword in ["so sanh", "khac nhau", "nen chon"]):
-        return "compare"
-    return "search"
-
-
 def extract_basic_entities(query: str) -> dict:
-    q = plain_text(query)
-    entities = {}
+    query_plain = plain_text(query)
+    entities: dict = {}
     colors = extract_color_entities(query)
     if colors:
         entities["colors"] = colors
-    categories = [cat for cat in CATEGORY_KEYWORDS if cat in q]
+    categories = [category for category in CATEGORY_KEYWORDS if category in query_plain]
     if categories:
         entities["categories"] = sorted(categories, key=len, reverse=True)
-    occasions = [occasion for occasion in OCCASION_KEYWORDS if occasion in q]
+    occasions = [occasion for occasion in OCCASION_KEYWORDS if occasion in query_plain]
     if occasions:
         entities["occasions"] = occasions
-    sizes = re.findall(r"\b(?:size\s*)?(xs|s|m|l|xl|xxl|xxxl|[2-5][0-9])\b", q, flags=re.IGNORECASE)
+    sizes = re.findall(
+        r"\b(?:size\s*)?(xs|s|m|l|xl|xxl|xxxl|[2-5][0-9])\b",
+        query_plain,
+        flags=re.IGNORECASE,
+    )
     if sizes:
-        entities["sizes"] = sorted(set(size.upper() for size in sizes))
-    budget = re.search(r"(?:duoi|nho hon|under|toi da|max)\s*(\d+(?:[\.,]\d+)?)\s*(k|nghin|ngan|trieu|m|vnd|d)?", q)
+        entities["sizes"] = sorted({size.upper() for size in sizes})
+    budget = re.search(
+        r"(?:duoi|nho hon|under|toi da|max)\s*(\d+(?:[\.,]\d+)?)\s*"
+        r"(k|nghin|ngan|trieu|m|vnd|d)?",
+        query_plain,
+    )
     if budget:
         entities["budget_text"] = budget.group(0)
     return entities
 
 
-def normalize_route(raw_route: str) -> str:
-    route = plain_text(raw_route).replace(" ", "_").replace("-", "_")
-    mapping = {
-        "search": ROUTE_PRODUCT_SEARCH,
-        "product": ROUTE_PRODUCT_SEARCH,
-        "product_search": ROUTE_PRODUCT_SEARCH,
-        "image_search": ROUTE_IMAGE_PRODUCT_SEARCH,
-        "image_product_search": ROUTE_IMAGE_PRODUCT_SEARCH,
-        "outfit": ROUTE_OUTFIT_ADVICE,
-        "outfit_advice": ROUTE_OUTFIT_ADVICE,
-        "mix_match": ROUTE_OUTFIT_ADVICE,
-        "profile": ROUTE_PROFILE_INQUIRY,
-        "profile_inquiry": ROUTE_PROFILE_INQUIRY,
-        "user_profile": ROUTE_PROFILE_INQUIRY,
-        "out_of_scope": ROUTE_OUT_OF_SCOPE,
-        "oos": ROUTE_OUT_OF_SCOPE,
-        "greeting": ROUTE_GREETING,
-        "hello": ROUTE_GREETING,
-        "chitchat": ROUTE_CHITCHAT,
-        "smalltalk": ROUTE_CHITCHAT,
-        "clarify": ROUTE_CLARIFY,
-        "unclear": ROUTE_CLARIFY,
-    }
-    return mapping.get(route, ROUTE_PRODUCT_SEARCH)
+def extract_profile_entities(query: str) -> dict:
+    """Extract explicit profile updates/deletions from Vietnamese text."""
+    query_plain = plain_text(query)
+    updates: dict = {}
+    delete_fields: list[str] = []
+
+    if any(phrase in query_plain for phrase in ["tu van do nam", "toi la nam", "gioi tinh nam"]):
+        updates["gender"] = "male"
+    if any(phrase in query_plain for phrase in ["tu van do nu", "toi la nu", "gioi tinh nu"]):
+        updates["gender"] = "female"
+
+    negative_profile_value = any(
+        phrase in query_plain
+        for phrase in ["khong phai", "khong co", "khong dung la"]
+    )
+
+    for label in LAYER_B_DANG_NGUOI:
+        if plain_text(label) in query_plain and not negative_profile_value:
+            updates["dang_nguoi"] = label
+            break
+    for label in LAYER_B_TONE_DA:
+        if plain_text(label) in query_plain and not negative_profile_value:
+            updates["tone_da"] = label
+            break
+
+    has_delete_verb = negative_profile_value or any(
+        keyword in query_plain for keyword in PROFILE_DELETE_KEYWORDS
+    )
+    if has_delete_verb:
+        mentioned_body_label = any(
+            plain_text(label) in query_plain for label in LAYER_B_DANG_NGUOI
+        )
+        mentioned_tone_label = any(
+            plain_text(label) in query_plain for label in LAYER_B_TONE_DA
+        )
+        if mentioned_body_label or any(
+            keyword in query_plain for keyword in ["dang nguoi", "voc dang", "body type"]
+        ):
+            delete_fields.append("dang_nguoi")
+        if mentioned_tone_label or any(
+            keyword in query_plain for keyword in ["tone da", "mau da", "skin tone"]
+        ):
+            delete_fields.append("tone_da")
+        if "gioi tinh" in query_plain:
+            delete_fields.append("gender")
+
+    if delete_fields:
+        return {"profile_delete_fields": sorted(set(delete_fields))}
+    if updates:
+        return {"profile_updates": updates}
+    return {}
 
 
-def route_from_keywords(query: str, state: dict | None = None) -> RouteDecision | None:
-    state = state or {}
+def strict_out_of_scope_hit(query: str) -> bool:
+    query_plain = plain_text(query)
+    return any(re.search(pattern, query_plain) for pattern in STRICT_OUT_OF_SCOPE_PATTERNS)
+
+
+def is_more_request(query: str) -> bool:
+    query_plain = plain_text(query)
+    return any(plain_text(keyword) in query_plain for keyword in FOLLOWUP_MORE_KEYWORDS)
+
+
+def infer_product_action(query: str) -> str:
+    query_plain = plain_text(query)
     if is_more_request(query):
-        previous = state.get("last_route_decision")
-        if previous and getattr(previous, "route", None) in CONTINUABLE_ROUTES:
-            return RouteDecision(
-                route=previous.route,
-                action="more",
-                confidence=0.98,
-                rewrite_query=previous.rewrite_query or state.get("last_query", query),
-                entities=dict(previous.entities),
-                reason="Follow-up more: reuse previous route/query.",
-                source="state",
-            )
-        return RouteDecision(
-            route=ROUTE_CLARIFY,
-            action="need_previous_search",
-            confidence=0.90,
-            rewrite_query=query,
-            missing_slots=["previous_search"],
-            reason="User asked for more, but there is no previous searchable turn.",
-            source="keyword",
+        return "more"
+    if "size" in query_plain or "kich co" in query_plain or re.search(
+        r"\b(xs|s|m|l|xl|xxl|xxxl)\b", query_plain
+    ):
+        return "size_check"
+    if any(keyword in query_plain for keyword in ["gia", "bao nhieu", "duoi", "tren", "re hon", "dat hon"]):
+        return "price_check"
+    if any(keyword in query_plain for keyword in ["con hang", "het hang", "ton kho"]):
+        return "stock_check"
+    if any(keyword in query_plain for keyword in ["so sanh", "khac nhau", "nen chon"]):
+        return "compare"
+    return "search"
+
+
+def resolve_route(intent: str, modality: str, action: str) -> str | None:
+    """Map semantic fields to one of the finite execution pipelines."""
+    if intent == INTENT_PRODUCT_DISCOVERY:
+        if modality in {MODALITY_IMAGE, MODALITY_TEXT_IMAGE} or action == "find_similar":
+            return ROUTE_IMAGE_PRODUCT_SEARCH
+        return ROUTE_TEXT_PRODUCT_SEARCH
+    if intent == INTENT_OUTFIT_ADVICE:
+        if modality in {MODALITY_IMAGE, MODALITY_TEXT_IMAGE} and action == "style_image_item":
+            return ROUTE_IMAGE_OUTFIT_ADVICE
+        return ROUTE_TEXT_OUTFIT_ADVICE
+    if intent == INTENT_PROFILE_ANALYSIS:
+        return ROUTE_PROFILE_VLM_ANALYSIS
+    if intent == INTENT_PROFILE_MANAGEMENT:
+        return ROUTE_PROFILE_STATE_HANDLER
+    if intent == INTENT_SOCIAL:
+        return ROUTE_SOCIAL_RESPONSE
+    if intent == INTENT_OUT_OF_SCOPE:
+        return ROUTE_OUT_OF_SCOPE_REDIRECT
+    return None
+
+
+def _decision(
+    intent: str,
+    modality: str,
+    action: str,
+    query: str,
+    *,
+    confidence: float,
+    source: str,
+    reason: str,
+    entities: dict | None = None,
+    image_context: dict | None = None,
+    trace: list[dict] | None = None,
+    workflow: list[str] | None = None,
+    follow_up_question: str = "",
+    follow_up_options: list[dict] | None = None,
+) -> IntentDecision:
+    route = resolve_route(intent, modality, action)
+    stages = list(trace or [])
+    stages.append(_trace("route", route or "none", f"{intent} + {modality} + {action}"))
+    return IntentDecision(
+        intent=intent,
+        modality=modality,
+        action=action,
+        route=route,
+        confidence=max(0.0, min(1.0, float(confidence))),
+        rewrite_query=query.strip(),
+        entities=entities or {},
+        image_context=image_context or {},
+        workflow=workflow or ([route] if route else []),
+        follow_up_question=follow_up_question,
+        follow_up_options=follow_up_options or [],
+        reason=reason,
+        source=source,
+        trace=stages,
+    )
+
+
+def _clarification(
+    query: str,
+    *,
+    modality: str,
+    missing_slots: list[str],
+    question: str,
+    options: list[dict],
+    reason: str,
+    source: str,
+    image_context: dict | None = None,
+    trace: list[dict] | None = None,
+) -> IntentDecision:
+    stages = list(trace or [])
+    stages.append(_trace("route", "clarification", ", ".join(missing_slots)))
+    return IntentDecision(
+        intent=INTENT_UNKNOWN,
+        modality=modality,
+        action="clarify",
+        route=None,
+        confidence=0.0,
+        rewrite_query=query.strip(),
+        image_context=image_context or {},
+        missing_slots=missing_slots,
+        needs_clarification=True,
+        clarification_question=question,
+        clarification_options=options,
+        reason=reason,
+        source=source,
+        trace=stages,
+    )
+
+
+def _image_description(image_context: dict) -> str:
+    return str(
+        image_context.get("caption")
+        or image_context.get("fashion_item")
+        or "ảnh thời trang bạn vừa gửi"
+    ).strip()
+
+
+def _route_image_request(query: str, image_context: dict | None = None) -> IntentDecision:
+    modality = MODALITY_TEXT_IMAGE if query.strip() else MODALITY_IMAGE
+    entities = extract_basic_entities(query)
+    trace = [_trace("modality", modality, "has_image=True")]
+
+    profile_hit = keyword_hit(query, IMAGE_PROFILE_KEYWORDS)
+    outfit_hit = keyword_hit(query, IMAGE_OUTFIT_KEYWORDS) or keyword_hit(query, DEFINITE_OUTFIT)
+    product_hit = keyword_hit(query, DEFINITE_SEARCH) or keyword_hit(query, CATEGORY_KEYWORDS)
+
+    if profile_hit and outfit_hit:
+        return _decision(
+            INTENT_PROFILE_ANALYSIS,
+            modality,
+            "analyze_then_style",
+            query,
+            confidence=0.99,
+            source="modality_keyword",
+            reason="Người dùng yêu cầu phân tích profile và phối đồ trong cùng lượt.",
+            entities=entities,
+            trace=trace + [_trace("keyword", "profile+outfit", query)],
+            workflow=[ROUTE_PROFILE_VLM_ANALYSIS, ROUTE_TEXT_OUTFIT_ADVICE],
+        )
+    if profile_hit:
+        action = "analyze_skin_tone" if keyword_hit(query, ["tone da", "mau da"]) else "analyze_full_profile"
+        return _decision(
+            INTENT_PROFILE_ANALYSIS,
+            modality,
+            action,
+            query,
+            confidence=0.98,
+            source="modality_keyword",
+            reason="Ảnh đi kèm yêu cầu phân tích người rõ ràng.",
+            entities=entities,
+            trace=trace + [_trace("keyword", "profile_analysis", query)],
+        )
+    if outfit_hit:
+        return _decision(
+            INTENT_OUTFIT_ADVICE,
+            modality,
+            "style_image_item",
+            query,
+            confidence=0.99,
+            source="modality_keyword",
+            reason="Ảnh đi kèm yêu cầu phối món trong ảnh.",
+            entities=entities,
+            trace=trace + [_trace("keyword", "image_outfit", query)],
+        )
+    if product_hit:
+        return _decision(
+            INTENT_PRODUCT_DISCOVERY,
+            modality,
+            "find_similar",
+            query,
+            confidence=0.98,
+            source="modality_keyword",
+            reason="Ảnh đi kèm yêu cầu tìm/xem sản phẩm rõ ràng.",
+            entities=entities,
+            trace=trace + [_trace("keyword", "image_product_search", query)],
         )
 
-    if keyword_hit(query, DEFINITE_GREETING):
-        return RouteDecision(ROUTE_GREETING, "answer", 0.99, query, reason="Matched greeting keyword.", source="keyword")
-    if keyword_hit(query, DEFINITE_CHITCHAT):
-        return RouteDecision(ROUTE_CHITCHAT, "answer", 0.99, query, reason="Matched chitchat keyword.", source="keyword")
+    if image_context is None:
+        # API should call the VLM image-understanding helper, then route again with
+        # the resulting structured context. This is not a clarification yet.
+        decision = IntentDecision(
+            intent=INTENT_UNKNOWN,
+            modality=modality,
+            action="inspect_image",
+            route=None,
+            confidence=0.0,
+            rewrite_query=query.strip(),
+            missing_slots=["image_context"],
+            reason="Cần hiểu nội dung ảnh trước khi chọn hoặc hỏi lại pipeline.",
+            source="modality_gate",
+            trace=trace + [_trace("image_understanding", "required", "VLM has not run")],
+        )
+        return decision
+
+    subject = str(image_context.get("subject", "unclear")).lower()
+    confidence = float(image_context.get("confidence", 0.0) or 0.0)
+    fashion_item = str(image_context.get("fashion_item", "")).strip()
+    caption = _image_description(image_context)
+    trace.append(
+        _trace(
+            "image_understanding",
+            subject,
+            f"confidence={confidence:.2f}; fashion_item={fashion_item or 'none'}",
+        )
+    )
+
+    if fashion_item and confidence >= IMAGE_ROUTER_CONFIDENCE_THRESHOLD:
+        search_query = query.strip() or f"Tìm sản phẩm giống {fashion_item} trong ảnh"
+        return _decision(
+            INTENT_PRODUCT_DISCOVERY,
+            modality,
+            "find_similar",
+            search_query,
+            confidence=confidence,
+            source="image_context_default",
+            reason="VLM nhận diện được món thời trang; mặc định tìm sản phẩm tương tự.",
+            entities=entities,
+            image_context=image_context,
+            trace=trace,
+            follow_up_question=(
+                f"Mình nhận ra {caption}. Bạn có muốn mình gợi ý cách phối đồ với món này không?"
+            ),
+            follow_up_options=[
+                {
+                    "label": "Phối đồ với món này",
+                    "value": "Phối đồ với món này",
+                    "action": "style_image_item",
+                },
+                {
+                    "label": "Không cần phối đồ",
+                    "value": "Không cần",
+                    "action": "keep_search_results",
+                },
+            ],
+        )
+
+    return _clarification(
+        query,
+        modality=modality,
+        missing_slots=["image_goal"],
+        question=(
+            f"Mình thấy {caption}, nhưng chưa xác định chắc món bạn quan tâm. "
+            "Bạn muốn tìm sản phẩm tương tự, phối đồ, hay phân tích người trong ảnh?"
+        ),
+        options=[
+            {"label": "Tìm sản phẩm tương tự", "action": "find_similar"},
+            {"label": "Gợi ý phối đồ", "action": "style_image_item"},
+            {"label": "Phân tích người trong ảnh", "action": "analyze_full_profile"},
+        ],
+        reason="Ảnh hoặc món thời trang có độ tin cậy thấp, cần người dùng xác nhận mục tiêu.",
+        source="image_context_clarify",
+        image_context=image_context,
+        trace=trace,
+    )
+
+
+def _route_pending_state(query: str, state: dict) -> IntentDecision | None:
+    query_plain = plain_text(query)
+
+    pending_profile = state.get("pending_profile_candidate")
+    if pending_profile:
+        trace = [_trace("state", "pending_profile_candidate", "awaiting confirmation")]
+        if any(keyword in query_plain for keyword in PROFILE_CONFIRM_KEYWORDS):
+            return _decision(
+                INTENT_PROFILE_MANAGEMENT,
+                MODALITY_TEXT,
+                "confirm_candidate",
+                query,
+                confidence=0.99,
+                source="state",
+                reason="Người dùng xác nhận lưu profile VLM đang chờ.",
+                entities={"profile_candidate": dict(pending_profile)},
+                trace=trace,
+            )
+        if any(keyword in query_plain for keyword in PROFILE_REJECT_KEYWORDS):
+            return _decision(
+                INTENT_PROFILE_MANAGEMENT,
+                MODALITY_TEXT,
+                "reject_candidate",
+                query,
+                confidence=0.99,
+                source="state",
+                reason="Người dùng từ chối profile VLM đang chờ.",
+                trace=trace,
+            )
+
+    pending_image_docs = state.get("pending_image_docs") or []
+    if pending_image_docs:
+        trace = [_trace("state", "pending_image_context", f"candidates={len(pending_image_docs)}")]
+        if keyword_hit(query, IMAGE_OUTFIT_KEYWORDS) or keyword_hit(query, DEFINITE_OUTFIT):
+            return _decision(
+                INTENT_OUTFIT_ADVICE,
+                MODALITY_TEXT_IMAGE,
+                "style_image_item",
+                query,
+                confidence=0.98,
+                source="state",
+                reason="Yêu cầu phối đồ kế thừa ảnh và candidates ở lượt trước.",
+                entities=extract_basic_entities(query),
+                image_context=dict(state.get("pending_image_context") or {}),
+                trace=trace,
+            )
+        if any(keyword in query_plain for keyword in CANCEL_PENDING_IMAGE_KEYWORDS):
+            return _decision(
+                INTENT_SOCIAL,
+                MODALITY_TEXT,
+                "social",
+                query,
+                confidence=0.98,
+                source="state",
+                reason="Người dùng từ chối gợi ý tiếp theo từ ảnh.",
+                entities={"clear_pending_image": True},
+                trace=trace,
+            )
+    return None
+
+
+def _route_profile_management(query: str) -> IntentDecision | None:
+    query_plain = plain_text(query)
+    trace = [_trace("keyword", "profile_management", query)]
+    if any(keyword in query_plain for keyword in PROFILE_CLEAR_ALL_KEYWORDS):
+        return _decision(
+            INTENT_PROFILE_MANAGEMENT,
+            MODALITY_TEXT,
+            "clear_all",
+            query,
+            confidence=0.99,
+            source="keyword",
+            reason="Người dùng yêu cầu xóa toàn bộ profile.",
+            trace=trace,
+        )
+    profile_entities = extract_profile_entities(query)
+    if profile_entities.get("profile_updates"):
+        return _decision(
+            INTENT_PROFILE_MANAGEMENT,
+            MODALITY_TEXT,
+            "update",
+            query,
+            confidence=0.97,
+            source="keyword",
+            reason="Phát hiện giá trị profile mới rõ ràng.",
+            entities=profile_entities,
+            trace=trace,
+        )
+    if profile_entities.get("profile_delete_fields"):
+        return _decision(
+            INTENT_PROFILE_MANAGEMENT,
+            MODALITY_TEXT,
+            "delete_field",
+            query,
+            confidence=0.97,
+            source="keyword",
+            reason="Người dùng yêu cầu xóa một số trường profile.",
+            entities=profile_entities,
+            trace=trace,
+        )
     if keyword_hit(query, DEFINITE_PROFILE_INQUIRY):
-        return RouteDecision(ROUTE_PROFILE_INQUIRY, "answer", 0.99, query, reason="User asks about saved profile.", source="keyword")
-    if strict_out_of_scope_hit(query):
-        return RouteDecision(ROUTE_OUT_OF_SCOPE, "redirect", 0.95, query, reason="Strict out-of-scope pattern.", source="keyword")
-    if keyword_hit(query, DEFINITE_OUTFIT):
-        return RouteDecision(
-            route=ROUTE_OUTFIT_ADVICE,
-            action="mix_match",
+        return _decision(
+            INTENT_PROFILE_MANAGEMENT,
+            MODALITY_TEXT,
+            "read",
+            query,
             confidence=0.99,
-            rewrite_query=query,
-            entities=extract_basic_entities(query),
-            reason="Matched high-precision outfit keyword.",
             source="keyword",
-        )
-    if keyword_hit(query, DEFINITE_SEARCH):
-        return RouteDecision(
-            route=ROUTE_PRODUCT_SEARCH,
-            action=infer_product_action(query),
-            confidence=0.99,
-            rewrite_query=query,
-            entities=extract_basic_entities(query),
-            reason="Matched high-precision product-search keyword.",
-            source="keyword",
-        )
-    # Heuristic: query mentions a clothing category → almost always product search.
-    # This avoids calling the LLM router for common queries like "áo thún màu đen" or "váy đi tiệc".
-    if keyword_hit(query, CATEGORY_KEYWORDS):
-        return RouteDecision(
-            route=ROUTE_PRODUCT_SEARCH,
-            action=infer_product_action(query),
-            confidence=0.85,
-            rewrite_query=query,
-            entities=extract_basic_entities(query),
-            reason="Clothing category keyword heuristic → product search (no LLM needed).",
-            source="keyword_heuristic",
+            reason="Người dùng hỏi thông tin profile đã lưu.",
+            trace=trace,
         )
     return None
 
 
+CONTINUABLE_ROUTES = {
+    ROUTE_TEXT_PRODUCT_SEARCH,
+    ROUTE_IMAGE_PRODUCT_SEARCH,
+    ROUTE_TEXT_OUTFIT_ADVICE,
+    ROUTE_IMAGE_OUTFIT_ADVICE,
+}
+
+
+def route_from_keywords(
+    query: str,
+    state: dict | None = None,
+    has_image: bool = False,
+    image_context: dict | None = None,
+) -> IntentDecision | None:
+    """Resolve modality, state and high-precision language without calling LLM."""
+    state = state or {}
+    if has_image:
+        return _route_image_request(query, image_context=image_context)
+
+    pending_decision = _route_pending_state(query, state)
+    if pending_decision:
+        return pending_decision
+
+    profile_decision = _route_profile_management(query)
+    if profile_decision:
+        return profile_decision
+
+    if is_more_request(query):
+        previous = state.get("last_route_decision")
+        if previous and getattr(previous, "route", None) in CONTINUABLE_ROUTES:
+            intent = getattr(previous, "intent", INTENT_PRODUCT_DISCOVERY)
+            modality = getattr(previous, "modality", MODALITY_TEXT)
+            action = "more" if intent == INTENT_PRODUCT_DISCOVERY else "refine_outfit"
+            return _decision(
+                intent,
+                modality,
+                action,
+                getattr(previous, "rewrite_query", "") or state.get("last_query", query),
+                confidence=0.98,
+                source="state",
+                reason="Follow-up kế thừa intent, modality và query trước.",
+                entities=dict(getattr(previous, "entities", {}) or {}),
+                image_context=dict(state.get("pending_image_context") or {}),
+                trace=[_trace("state", "continue_previous", previous.route)],
+            )
+        return _clarification(
+            query,
+            modality=MODALITY_TEXT,
+            missing_slots=["previous_search"],
+            question="Bạn muốn xem thêm nhóm sản phẩm nào?",
+            options=[
+                {"label": "Áo", "action": "search_category", "value": "Áo"},
+                {"label": "Quần", "action": "search_category", "value": "Quần"},
+                {"label": "Váy/Đầm", "action": "search_category", "value": "Đầm"},
+            ],
+            reason="Không có lượt tìm kiếm trước để kế thừa.",
+            source="state",
+            trace=[_trace("state", "missing_previous_search")],
+        )
+
+    if keyword_hit(query, DEFINITE_GREETING):
+        return _decision(
+            INTENT_SOCIAL, MODALITY_TEXT, "greeting", query,
+            confidence=0.99, source="keyword", reason="Khớp lời chào.",
+            trace=[_trace("keyword", "greeting", query)],
+        )
+    if keyword_hit(query, DEFINITE_CHITCHAT):
+        action = "goodbye" if keyword_hit(query, SOCIAL_GOODBYE_KEYWORDS) else "thanks"
+        return _decision(
+            INTENT_SOCIAL, MODALITY_TEXT, action, query,
+            confidence=0.99, source="keyword", reason="Khớp câu xã giao.",
+            trace=[_trace("keyword", action, query)],
+        )
+    if strict_out_of_scope_hit(query):
+        return _decision(
+            INTENT_OUT_OF_SCOPE, MODALITY_TEXT, "redirect", query,
+            confidence=0.95, source="keyword", reason="Khớp mẫu ngoài phạm vi nghiêm ngặt.",
+            trace=[_trace("keyword", "out_of_scope", query)],
+        )
+    if keyword_hit(query, DEFINITE_OUTFIT):
+        return _decision(
+            INTENT_OUTFIT_ADVICE,
+            MODALITY_TEXT,
+            "create_outfit",
+            query,
+            confidence=0.99,
+            source="keyword",
+            reason="Khớp từ khóa phối đồ độ chính xác cao.",
+            entities=extract_basic_entities(query),
+            trace=[_trace("keyword", "outfit_advice", query)],
+        )
+    if keyword_hit(query, DEFINITE_SEARCH):
+        action = infer_product_action(query)
+        return _decision(
+            INTENT_PRODUCT_DISCOVERY,
+            MODALITY_TEXT,
+            action,
+            query,
+            confidence=0.99,
+            source="keyword",
+            reason="Khớp từ khóa tìm/hỏi sản phẩm độ chính xác cao.",
+            entities=extract_basic_entities(query),
+            trace=[_trace("keyword", action, query)],
+        )
+    if keyword_hit(query, CATEGORY_KEYWORDS):
+        action = infer_product_action(query)
+        return _decision(
+            INTENT_PRODUCT_DISCOVERY,
+            MODALITY_TEXT,
+            action,
+            query,
+            confidence=0.85,
+            source="keyword_heuristic",
+            reason="Có category thời trang rõ ràng; không cần gọi LLM router.",
+            entities=extract_basic_entities(query),
+            trace=[_trace("category_heuristic", action, query)],
+        )
+    return None
+
+
+ROUTE_CLASSIFY_PROMPT = (
+    "You classify the business intent of a Vietnamese fashion-shopping request.\n"
+    "Return exactly one compact JSON object. Do not choose an execution route.\n\n"
+    "Allowed intents:\n"
+    "- product_discovery: find/view/compare products; ask price, size or stock.\n"
+    "- outfit_advice: create/refine an outfit or ask what to wear.\n"
+    "- profile_management: read/update/delete saved profile information.\n"
+    "- social: greeting, thanks or goodbye.\n"
+    "- out_of_scope: clearly unrelated to fashion and cannot be redirected naturally.\n"
+    "- unknown: too vague to act safely.\n\n"
+    "Stock data is unavailable; still classify stock questions as product_discovery.\n"
+    "Weather plus 'what to wear' is outfit_advice, not out_of_scope.\n\n"
+    "Previous context: {context_block}\n"
+    "User query: {query}\n\n"
+    "Schema:\n"
+    "{{\"intent\":\"product_discovery|outfit_advice|profile_management|social|out_of_scope|unknown\","
+    "\"action\":\"search|more|price_check|size_check|stock_check|compare|create_outfit|refine_outfit|read|update|delete_field|clear_all|greeting|thanks|goodbye|redirect|clarify\","
+    "\"confidence\":0.0,\"rewrite_query\":\"retrieval-ready Vietnamese query\","
+    "\"entities\":{{}},\"missing_slots\":[],\"reason\":\"short operational reason\"}}"
+)
+
+ollama_client = ollama.Client(host=OLLAMA_BASE_URL)
+
+
 def extract_json_object(text: str) -> dict | None:
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
     except Exception:
         pass
-    match = re.search(r"\{.*\}", text or "", flags=re.DOTALL)
+    match = re.search(r"\{.*\}", str(text or ""), flags=re.DOTALL)
     if not match:
         return None
     try:
-        return json.loads(match.group(0))
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
     except Exception:
         return None
 
 
-def coerce_route_decision(data: dict, query: str, source: str) -> RouteDecision:
-    route = normalize_route(str(data.get("route", ROUTE_PRODUCT_SEARCH)))
-    action = str(data.get("action") or ("mix_match" if route == ROUTE_OUTFIT_ADVICE else "search"))
+def coerce_intent_decision(
+    data: dict,
+    query: str,
+    *,
+    modality: str = MODALITY_TEXT,
+    source: str = "llm",
+) -> IntentDecision:
+    intent = str(data.get("intent", INTENT_UNKNOWN)).strip().lower()
+    if intent not in BUSINESS_INTENTS | {INTENT_UNKNOWN}:
+        intent = INTENT_UNKNOWN
+    action = str(data.get("action") or "search").strip().lower()
     rewrite_query = str(data.get("rewrite_query") or query).strip() or query
     try:
-        confidence = float(data.get("confidence", 0.70))
+        confidence = max(0.0, min(1.0, float(data.get("confidence", 0.70))))
     except Exception:
         confidence = 0.70
     entities = data.get("entities") if isinstance(data.get("entities"), dict) else {}
-    missing_slots = data.get("missing_slots") if isinstance(data.get("missing_slots"), list) else []
     if not entities:
         entities = extract_basic_entities(rewrite_query)
-    return RouteDecision(
-        route=route,
-        action=action,
-        confidence=max(0.0, min(1.0, confidence)),
-        rewrite_query=rewrite_query,
-        entities=entities,
-        missing_slots=missing_slots,
-        reason=str(data.get("reason", "LLM route classification.")),
+    missing_slots = data.get("missing_slots") if isinstance(data.get("missing_slots"), list) else []
+    reason = str(data.get("reason", "LLM intent classification."))
+    trace = [_trace("llm_intent", intent, f"confidence={confidence:.2f}; action={action}")]
+
+    if intent == INTENT_UNKNOWN or missing_slots:
+        return _clarification(
+            query,
+            modality=modality,
+            missing_slots=[str(slot) for slot in missing_slots] or ["user_goal"],
+            question="Bạn muốn tìm một sản phẩm cụ thể hay muốn mình gợi ý cách phối đồ?",
+            options=[
+                {"label": "Tìm sản phẩm", "action": "search"},
+                {"label": "Gợi ý phối đồ", "action": "create_outfit"},
+            ],
+            reason=reason,
+            source=source,
+            trace=trace,
+        )
+
+    allowed_actions = {
+        INTENT_PRODUCT_DISCOVERY: PRODUCT_ACTIONS,
+        INTENT_OUTFIT_ADVICE: OUTFIT_ACTIONS,
+        INTENT_PROFILE_MANAGEMENT: PROFILE_MANAGEMENT_ACTIONS,
+        INTENT_SOCIAL: SOCIAL_ACTIONS,
+        INTENT_OUT_OF_SCOPE: {"redirect"},
+    }.get(intent, {action})
+    if action not in allowed_actions:
+        action = {
+            INTENT_PRODUCT_DISCOVERY: "search",
+            INTENT_OUTFIT_ADVICE: "create_outfit",
+            INTENT_PROFILE_MANAGEMENT: "read",
+            INTENT_SOCIAL: "social",
+            INTENT_OUT_OF_SCOPE: "redirect",
+        }.get(intent, "clarify")
+
+    return _decision(
+        intent,
+        modality,
+        action,
+        rewrite_query,
+        confidence=confidence,
         source=source,
+        reason=reason,
+        entities=entities,
+        trace=trace,
     )
 
 
-def classify_route_llm(query: str, last_bot_msg: str = "") -> RouteDecision:
+def coerce_route_decision(
+    data: dict,
+    query: str,
+    source: str = "llm",
+) -> IntentDecision:
+    """Backward-compatible wrapper for old positional notebook calls."""
+    return coerce_intent_decision(data, query, source=source)
+
+
+def classify_intent_llm(query: str, last_bot_msg: str = "") -> IntentDecision:
     context_block = last_bot_msg[:300] if last_bot_msg else "none"
     try:
-        response = ollama.chat(
+        response = ollama_client.chat(
             model=LLM_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": ROUTE_CLASSIFY_PROMPT.format(query=query, context_block=context_block),
-                }
-            ],
-            options={"temperature": 0, "num_predict": 80},  # Reduced from 220 — JSON route is short
+            messages=[{
+                "role": "user",
+                "content": ROUTE_CLASSIFY_PROMPT.format(
+                    query=query,
+                    context_block=context_block,
+                ),
+            }],
+            options={"temperature": 0, "num_predict": 100},
             format="json",
         )
         raw = response["message"]["content"].strip()
         parsed = extract_json_object(raw)
         if parsed:
-            return coerce_route_decision(parsed, query, source="llm")
-        return RouteDecision(
-            normalize_route(raw),
-            "search",
-            0.55,
-            query,
-            extract_basic_entities(query),
-            reason=f"LLM non-JSON: {raw[:80]}",
-            source="llm_fallback",
-        )
+            return coerce_intent_decision(parsed, query, source="llm")
     except Exception as exc:
-        print(f"[WARN] LLM route classify error: {exc} -> fallback product_search")
-    return RouteDecision(
-        ROUTE_PRODUCT_SEARCH,
-        infer_product_action(query),
-        0.40,
+        print(f"[WARN] LLM intent classify error: {exc}")
+
+    return _clarification(
         query,
-        extract_basic_entities(query),
-        reason="Router failed; safest fallback is product search.",
+        modality=MODALITY_TEXT,
+        missing_slots=["user_goal"],
+        question="Bạn muốn tìm sản phẩm cụ thể hay muốn mình tư vấn phối đồ?",
+        options=[
+            {"label": "Tìm sản phẩm", "action": "search"},
+            {"label": "Tư vấn phối đồ", "action": "create_outfit"},
+        ],
+        reason="Không phân loại chắc chắn được; hỏi lại an toàn hơn tự tìm sai.",
         source="fallback",
+        trace=[_trace("llm_intent", "failed")],
     )
+
+
+# Legacy name retained for callers that explicitly request the LLM layer.
+classify_route_llm = classify_intent_llm
 
 
 def route_user_request(
@@ -443,68 +1033,96 @@ def route_user_request(
     last_bot_msg: str = "",
     state: dict | None = None,
     force_image_search: bool = False,
-) -> RouteDecision:
+    has_image: bool = False,
+    image_context: dict | None = None,
+) -> IntentDecision:
+    """Return one semantic decision using deterministic stages before LLM."""
+    state = state or {}
     if force_image_search:
-        return RouteDecision(
-            ROUTE_IMAGE_PRODUCT_SEARCH,
-            "search_similar_image",
-            1.0,
-            query,
-            extract_basic_entities(query),
-            reason="Product image retrieval already returned candidates.",
-            source="modality",
+        modality = MODALITY_TEXT_IMAGE if query.strip() else MODALITY_IMAGE
+        return _decision(
+            INTENT_PRODUCT_DISCOVERY,
+            modality,
+            "find_similar",
+            query or "Tìm sản phẩm giống ảnh đã tải lên",
+            confidence=1.0,
+            source="modality_override",
+            reason="Image retrieval đã có candidates, route được khóa vào image search.",
+            entities=extract_basic_entities(query),
+            image_context=image_context,
+            trace=[_trace("modality_override", "image_product_search")],
         )
-    fast = route_from_keywords(query, state=state)
-    if fast:
-        return fast
-    return classify_route_llm(query, last_bot_msg=last_bot_msg)
+    fast_decision = route_from_keywords(
+        query,
+        state=state,
+        has_image=has_image,
+        image_context=image_context,
+    )
+    if fast_decision:
+        return fast_decision
+    return classify_intent_llm(query, last_bot_msg=last_bot_msg)
 
 
 def detect_intent_llm(query: str, last_bot_msg: str = "") -> str:
-    return classify_route_llm(query, last_bot_msg=last_bot_msg).intent
+    return classify_intent_llm(query, last_bot_msg=last_bot_msg).handler
 
 
 def detect_intent(query: str, last_bot_msg: str = "") -> str:
-    return route_user_request(query, last_bot_msg=last_bot_msg).intent
+    return route_user_request(query, last_bot_msg=last_bot_msg).handler
 
 
 def detect_gender(query: str) -> str:
-    return "male" if keyword_hit(query, MALE_KEYWORDS) else "unknown"
+    query_plain = plain_text(query)
+    female_keywords = ["nu", "con gai", "ban gai", "phu nu", "vo"]
+    if keyword_hit(query, MALE_KEYWORDS):
+        return "male"
+    if any(keyword in query_plain for keyword in female_keywords):
+        return "female"
+    return "unknown"
+
+
+def get_social_response(action: str) -> str:
+    if action == "greeting":
+        return (
+            "Xin chào! Mình là trợ lý tư vấn thời trang của shop. "
+            "Bạn muốn tìm sản phẩm, phối đồ, hay gửi ảnh để mình gợi ý hôm nay?"
+        )
+    if action == "goodbye":
+        return "Cảm ơn bạn đã ghé shop. Hẹn gặp lại bạn nhé!"
+    return "Rất vui được hỗ trợ bạn. Khi cần tìm đồ hoặc phối outfit, cứ nhắn mình nhé."
 
 
 def get_greeting_response() -> str:
-    return (
-        "Xin chào! Mình là trợ lý tư vấn thời trang của shop. "
-        "Bạn muốn tìm sản phẩm, phối đồ, hay gửi ảnh để mình gợi ý hôm nay?"
-    )
+    return get_social_response("greeting")
 
 
 def get_chitchat_response(query: str) -> str:
-    return "Rất vui được hỗ trợ bạn. Khi cần tìm đồ hoặc phối outfit, cứ nhắn mình nhé."
+    action = "goodbye" if keyword_hit(query, SOCIAL_GOODBYE_KEYWORDS) else "thanks"
+    return get_social_response(action)
 
 
 def get_profile_inquiry_response(profile: dict) -> str:
     if not profile:
-        return "Mình chưa có thông tin dáng người hoặc tone da của bạn. Bạn có thể gửi ảnh người hoặc mô tả vóc dáng để mình tư vấn sát hơn nhé."
-
-    gender = profile.get("gender", "chưa rõ")
-    body = profile.get("dang_nguoi", "chưa rõ")
-    tone = profile.get("tone_da", "chưa rõ")
+        return (
+            "Mình chưa biết nhiều về vóc dáng và sở thích của bạn. Bạn có thể chia sẻ trực tiếp "
+            "hoặc gửi một bức ảnh; mình chỉ ghi nhớ khi bạn đồng ý."
+        )
     return (
-        f"Mình đang lưu thông tin của bạn như sau: giới tính/ngữ cảnh: {gender}, "
-        f"dáng người: {body}, tone da: {tone}. "
-        "Mình sẽ dùng các thông tin này để gợi ý outfit và sản phẩm phù hợp hơn."
+        "Những điều mình đang ghi nhớ về bạn: "
+        f"giới tính/ngữ cảnh là {profile.get('gender', 'chưa rõ')}, "
+        f"dáng người là {profile.get('dang_nguoi', 'chưa rõ')}, "
+        f"tone da là {profile.get('tone_da', 'chưa rõ')}."
     )
 
 
 def get_out_of_scope_response(query: str) -> str:
     return (
         "Câu này hơi nằm ngoài phạm vi tư vấn thời trang của mình. "
-        "Nhưng nếu bạn muốn, mình có thể kéo nó về chuyện mặc đẹp: ví dụ chọn đồ theo thời tiết, dịp đi chơi, ngân sách hoặc phong cách bạn thích."
+        "Mình có thể giúp bạn chọn đồ theo thời tiết, dịp sử dụng, ngân sách hoặc phong cách."
     )
 
 
-def get_clarify_response(decision: RouteDecision | None = None) -> str:
-    if decision and "previous_search" in decision.missing_slots:
-        return "Bạn muốn xem thêm nhóm sản phẩm nào? Ví dụ: 'xem thêm áo thun trắng' hoặc 'xem thêm váy đi tiệc'."
-    return "Mình cần bạn nói rõ hơn một chút: bạn muốn tìm sản phẩm cụ thể hay muốn mình tư vấn phối đồ?"
+def get_clarify_response(decision: IntentDecision | None = None) -> str:
+    if decision and decision.clarification_question:
+        return decision.clarification_question
+    return "Bạn muốn tìm một sản phẩm cụ thể hay muốn mình tư vấn phối đồ?"

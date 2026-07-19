@@ -18,6 +18,7 @@ METADATA_DIR = os.path.join(DATA_DIR, "metadata")
 STATIC_DIR = os.path.join(BASE_DIR, "app", "static")
 # IMAGES_DIR = os.path.join(BASE_DIR, "images")
 # PRODUCT_IMAGE_ROOT = IMAGES_DIR
+IMAGES_DIR = "D:/KHÓA LUẬN/WORKSPACE/Amazon_Lazada_Fashion_Metadata_65k/images"
 PRODUCT_IMAGE_ROOT = "D:/KHÓA LUẬN/WORKSPACE/Amazon_Lazada_Fashion_Metadata_65k/images"
 
 METADATA_FILE = os.path.join(METADATA_DIR, "meta_Amazon_Lazada_Fashion_65k.jsonl")
@@ -34,10 +35,10 @@ VIFASHIONCLIP_CHECKPOINT = os.path.join(
 
 
 # Ollama models
-OLLAMA_BASE_URL = "http://localhost:11434"
-EMBEDDING_MODEL = "bge-m3"
-LLM_MODEL = "qwen3:4b-instruct"
-VISION_MODEL = "qwen2.5vl:3b"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "bge-m3")
+LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b-instruct")
+VISION_MODEL = os.getenv("VISION_MODEL", "qwen2.5vl:3b")
 QWEN_VL_MODEL = VISION_MODEL
 
 
@@ -67,6 +68,19 @@ LLM_TEMPERATURE = 0.4
 LLM_TIMEOUT = 120
 LLM_NUM_PREDICT = 1024
 LLM_NUM_CTX = 4096  # Reduced from 8192 to cut prefill latency (~30% faster TTFT)
+
+# Router diagnostics and multimodal policy
+# Keep detailed traces available for notebooks/logs, but do not expose them to
+# the web client unless explicitly enabled.
+DEBUG_ROUTER_TRACE = os.getenv("DEBUG_ROUTER_TRACE", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+IMAGE_ROUTER_CONFIDENCE_THRESHOLD = float(
+    os.getenv("IMAGE_ROUTER_CONFIDENCE_THRESHOLD", "0.55")
+)
 
 
 # Qdrant
@@ -101,12 +115,20 @@ IMAGE_SEARCH_SCORE_THRESHOLD = 0.15
 LAYER_B_SCORE_THRESHOLD = 0.50
 LAYER_B_FALLBACK_SCORE_THRESHOLD = 0.40
 LAYER_B_LIMIT = 1
+OUTFIT_MAX_PRODUCT_SLOTS = int(os.getenv("OUTFIT_MAX_PRODUCT_SLOTS", "3"))
 
 
-# Redis history
+# Redis history. The demo keeps only recent turns by default so a request never
+# waits for an extra LLM summarization round-trip.
 REDIS_URL = "redis://localhost:6379"
-HISTORY_MAX_MESSAGES = 8
-HISTORY_RECENT_KEEP = 4
+HISTORY_MAX_MESSAGES = int(os.getenv("HISTORY_MAX_MESSAGES", "6"))
+HISTORY_RECENT_KEEP = int(os.getenv("HISTORY_RECENT_KEEP", "4"))
+HISTORY_ENABLE_SUMMARIZATION = os.getenv("HISTORY_ENABLE_SUMMARIZATION", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 SUMMARIZE_MAX_TOKENS = 150
 
 
@@ -119,6 +141,12 @@ API_PORT = 8000
 
 # Vision
 VL_MAX_SIZE = 512
+PRELOAD_IMAGE_ENCODER = os.getenv("PRELOAD_IMAGE_ENCODER", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 LAYER_B_DANG_NGUOI = [
     "Dáng quả lê",
     "Dáng quả táo",

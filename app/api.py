@@ -16,23 +16,63 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import API_TITLE, API_VERSION, IMAGES_DIR, STATIC_DIR
+from app.config import (
+    API_TITLE,
+    API_VERSION,
+    DEBUG_ROUTER_TRACE,
+    IMAGES_DIR,
+    PRELOAD_IMAGE_ENCODER,
+    STATIC_DIR,
+)
 
 
 app = FastAPI(title=API_TITLE, version=API_VERSION)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 if os.path.exists(IMAGES_DIR):
     app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-sessions: dict = {}
+def _preload_image_encoder() -> None:
+    """Warm FashionCLIP in the background before the first demo request."""
+    try:
+        from app.core.image_search import get_image_embeddings
+
+        get_image_embeddings()
+        print("[OK] FashionCLIP image encoder preloaded.")
+    except Exception as exc:
+        print(f"[WARN] FashionCLIP preload failed; the first image request will retry: {exc}")
+
+
+@app.on_event("startup")
+async def _warm_up_before_serving() -> None:
+    if PRELOAD_IMAGE_ENCODER:
+        # Chỉ báo API sẵn sàng sau khi import/model warm-up hoàn tất. Nếu chạy
+        # nền, request text đầu tiên có thể tranh import lock với FashionCLIP.
+        await asyncio.to_thread(_preload_image_encoder)
+
+
+sessions: dict[str, dict] = {}
+
+
+def _new_session_state() -> dict:
+    """Create the complete state shape in one place."""
+    return {
+        "profile": {},
+        "last_bot_msg": "",
+        "last_route_decision": None,
+        "last_query": "",
+        "pending_profile_candidate": None,
+        "pending_image_context": None,
+        "pending_image_docs": [],
+        "unclear_count": 0,
+    }
 
 
 def make_event(data: dict) -> str:
@@ -40,21 +80,65 @@ def make_event(data: dict) -> str:
 
 
 def _docs_to_images(docs) -> list[dict]:
-    images = []
+    """Serialize retrieved documents into browser-ready commerce cards."""
+    products = []
     for doc in docs or []:
         doc_images = doc.metadata.get("images", [])
         if isinstance(doc_images, str):
             doc_images = [doc_images] if doc_images else []
+        main_image = doc.metadata.get("image_url", "")
+        if main_image and main_image not in doc_images:
+            doc_images = [main_image, *doc_images]
         doc_images = [url for url in doc_images if url]
         if doc_images:
-            images.append(
+            products.append(
                 {
                     "product_id": doc.metadata.get("product_id", ""),
+                    "title": doc.metadata.get("title", "") or "Sản phẩm thời trang",
                     "category": doc.metadata.get("category", ""),
-                    "images": doc_images[:2],
+                    "brand": doc.metadata.get("brand", "") or "Thương hiệu khác",
+                    "price": doc.metadata.get("price", 0),
+                    "images": [_browser_image_url(url) for url in doc_images],
                 }
             )
-    return images
+    return products
+
+
+def _normalize_product_cards(products: list[dict]) -> list[dict]:
+    """Normalize product-card payloads produced outside the API module."""
+    normalized = []
+    for product in products or []:
+        item = dict(product)
+        images = item.get("images", [])
+        if isinstance(images, str):
+            images = [images]
+        item["images"] = [_browser_image_url(url) for url in images if url]
+        alternatives = item.get("alternatives", [])
+        item["alternatives"] = _normalize_product_cards(alternatives) if alternatives else []
+        item.setdefault("title", item.get("category") or "Sản phẩm thời trang")
+        item.setdefault("brand", "Thương hiệu khác")
+        item.setdefault("price", 0)
+        normalized.append(item)
+    return normalized
+
+
+def _browser_image_url(value: str) -> str:
+    """Convert local metadata paths into URLs served by FastAPI's /images mount."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith(("http://", "https://", "data:", "blob:", "/images/")):
+        return raw
+    normalized = raw.replace("\\", "/")
+    try:
+        relative = os.path.relpath(raw, IMAGES_DIR).replace("\\", "/")
+        if not relative.startswith("../") and relative != "..":
+            return f"/images/{relative.lstrip('/')}"
+    except (TypeError, ValueError):
+        pass
+    if normalized.lower().startswith("images/"):
+        normalized = normalized.split("/", 1)[1]
+    return f"/images/{normalized.lstrip('/')}"
 
 
 def _is_reranker_enabled() -> bool:
@@ -66,6 +150,24 @@ def _is_reranker_enabled() -> bool:
         return False
 
 
+def _retrieval_progress_message(entities: dict) -> str:
+    """Build a short user-facing status from observable retrieval constraints."""
+    parts = []
+    categories = entities.get("categories") or []
+    if categories:
+        parts.append(str(categories[0]).replace("ao", "áo", 1))
+    budget = str(entities.get("budget_text") or "").strip()
+    if budget:
+        budget = budget.replace("duoi", "dưới").replace("trieu", "triệu")
+        parts.append(budget)
+    sizes = entities.get("sizes") or []
+    if sizes:
+        parts.append(f"size {', '.join(map(str, sizes))}")
+    if not parts:
+        return "Mình đang xem những món phù hợp nhất trong cửa hàng..."
+    return f"Mình đang tìm trong cửa hàng theo: {' · '.join(parts)}..."
+
+
 def _stream_chain_via_queue(
     chain,
     input_dict: dict,
@@ -73,7 +175,7 @@ def _stream_chain_via_queue(
     token_queue: queue.Queue,
     chain_type: str,
 ) -> None:
-    """Run a LangChain stream in a worker thread and push serializable chunks."""
+    """Run a blocking LangChain stream in a worker thread."""
     try:
         for chunk in chain.stream(input_dict, config=config):
             if chain_type == "search":
@@ -90,12 +192,10 @@ def _stream_chain_via_queue(
                         }
                     )
                 token = chunk.get("answer", "")
-                if token:
-                    token_queue.put({"ok": True, "item_type": "token", "content": token})
             else:
                 token = chunk.content if hasattr(chunk, "content") else str(chunk)
-                if token:
-                    token_queue.put({"ok": True, "item_type": "token", "content": token})
+            if token:
+                token_queue.put({"ok": True, "item_type": "token", "content": token})
     except Exception as exc:
         token_queue.put({"ok": False, "error": str(exc)})
     finally:
@@ -108,16 +208,31 @@ async def _stream_text(reply: str, delay: float = 0.01):
         await asyncio.sleep(delay)
 
 
+def _decision_event(decision, gender: str, include_trace: bool = False) -> dict:
+    event = {
+        "type": "route_detected",
+        "intent": decision.intent,
+        "modality": decision.modality,
+        "action": decision.action,
+        "route": decision.route,
+        "handler": decision.handler,
+        "source": decision.source,
+        "confidence": decision.confidence,
+        "reason": decision.reason,
+        "entities": decision.entities,
+        "missing_slots": decision.missing_slots,
+        "workflow": decision.workflow,
+        "gender": gender,
+    }
+    if DEBUG_ROUTER_TRACE or include_trace:
+        event["trace"] = decision.trace
+    return event
+
+
 @app.post("/api/session")
 async def create_session():
     sid = str(uuid.uuid4())
-    sessions[sid] = {
-        "profile": {},
-        "last_bot_msg": "",
-        "last_route_decision": None,
-        "last_query": "",
-        "unclear_count": 0,
-    }
+    sessions[sid] = _new_session_state()
     return {"session_id": sid}
 
 
@@ -137,20 +252,20 @@ async def chat(
     message: str = Form(""),
     session_id: str = Form(...),
     image: UploadFile = File(None),
+    developer_mode: bool = Form(False),
 ):
-    """Main chat endpoint. Returns Server-Sent Events for token streaming."""
+    """Route a request and stream observable results as Server-Sent Events."""
 
     async def event_stream():
         from app.core.intent import (
-            ROUTE_PRODUCT_SEARCH,
+            ROUTE_IMAGE_OUTFIT_ADVICE,
             detect_gender,
-            get_chitchat_response,
             get_clarify_response,
-            get_greeting_response,
             get_out_of_scope_response,
-            get_profile_inquiry_response,
+            get_social_response,
             route_user_request,
         )
+        from app.core.profile import apply_profile_decision, sanitize_profile_candidate
         from app.core.security import (
             append_chat_turn_log,
             check_answer_grounding,
@@ -158,40 +273,71 @@ async def chat(
             extract_product_ids_from_text,
             validate_user_query,
         )
+        from app.core.telemetry import TurnTelemetry
 
-        if session_id not in sessions:
-            sessions[session_id] = {
-                "profile": {},
-                "last_bot_msg": "",
-                "last_route_decision": None,
-                "last_query": "",
-                "unclear_count": 0,
-            }
-
-        state = sessions[session_id]
-        profile = state["profile"]
+        state = sessions.setdefault(session_id, _new_session_state())
+        profile = dict(state.get("profile") or {})
         last_bot_msg = state.get("last_bot_msg", "")
-        final_query = message or ""
-        active_query = final_query
-        image_search_docs = []
-        force_image_search = False
+        image_present = bool(image and image.filename)
         start_time = time.time()
+        telemetry = TurnTelemetry()
         first_token_time = None
         response_tokens: list[str] = []
         retrieved_docs = []
+        image_search_docs = []
         allowed_product_ids: set[str] = set()
-        grounding_route = ""
+        temporary_profile = None
+
+        def done_payload(ttft: float = 0.0, **extra) -> dict:
+            """Build one consistent completion event, including developer telemetry."""
+            payload = {
+                "type": "done",
+                "ttft": round(ttft, 2),
+                "total": round(time.time() - start_time, 2),
+                **extra,
+            }
+            if developer_mode:
+                payload.update(telemetry.snapshot())
+            return payload
+
+        def decision_used_llm(current_decision) -> bool:
+            """Detect both successful and failed LLM-router attempts."""
+            if current_decision.source == "llm":
+                return True
+            return any(item.get("stage") == "llm_intent" for item in current_decision.trace or [])
 
         is_valid, validation_message = validate_user_query(message or "")
         if not is_valid:
             async for event in _stream_text(validation_message):
                 yield event
-            yield make_event({"type": "done", "ttft": 0.0, "total": round(time.time() - start_time, 2)})
+            yield make_event(done_payload())
             return
 
-        if image and image.filename:
+        stage_started = telemetry.begin()
+        decision = await asyncio.to_thread(
+            route_user_request,
+            message or "",
+            last_bot_msg,
+            state,
+            False,
+            image_present,
+        )
+        telemetry.finish("router", stage_started)
+        if decision_used_llm(decision):
+            telemetry.add_call("llm_router")
+        final_query = decision.rewrite_query or message or ""
+        yield make_event(
+            {
+                "type": "progress",
+                "phase": "routing",
+                "message": "Mình đang đọc kỹ điều bạn mong muốn...",
+                "status": "active",
+            }
+        )
+
+        if image_present:
             from app.core.image_search import search_products_by_image
-            from app.core.vision import analyze_person_image, caption_product_image, detect_image_type
+            from app.core.vision import analyze_person_image, describe_image_for_routing
 
             suffix = os.path.splitext(image.filename)[1] or ".jpg"
             tmp_path = None
@@ -200,51 +346,131 @@ async def chat(
                     tmp.write(await image.read())
                     tmp_path = tmp.name
 
-                image_type = await asyncio.to_thread(detect_image_type, tmp_path, message)
-                yield make_event({"type": "image_type_detected", "image_type": image_type})
+                if decision.action == "inspect_image":
+                    yield make_event(
+                        {
+                            "type": "progress",
+                            "phase": "vision",
+                            "message": "Mình đang xem món đồ trong ảnh của bạn...",
+                            "status": "active",
+                        }
+                    )
+                    stage_started = telemetry.begin()
+                    image_context = await asyncio.to_thread(
+                        describe_image_for_routing,
+                        tmp_path,
+                        message or "",
+                    )
+                    telemetry.finish("vlm_image_understanding", stage_started)
+                    telemetry.add_call("vlm")
+                    yield make_event({"type": "image_understood", **image_context})
+                    stage_started = telemetry.begin()
+                    decision = await asyncio.to_thread(
+                        route_user_request,
+                        message or "",
+                        last_bot_msg,
+                        state,
+                        False,
+                        True,
+                        image_context,
+                    )
+                    telemetry.finish("router", stage_started)
+                    if decision_used_llm(decision):
+                        telemetry.add_call("llm_router")
+                    final_query = decision.rewrite_query or message or ""
 
-                if image_type == "person":
+                if decision.handler == "profile_analysis":
+                    yield make_event(
+                        {
+                            "type": "progress",
+                            "phase": "profile",
+                            "message": "Mình đang quan sát để hiểu vóc dáng và tone da của bạn...",
+                            "status": "active",
+                        }
+                    )
+                    stage_started = telemetry.begin()
                     person_info = await asyncio.to_thread(analyze_person_image, tmp_path)
-                    if person_info.get("dang_nguoi"):
-                        profile["dang_nguoi"] = person_info["dang_nguoi"]
-                    if person_info.get("tone_da"):
-                        profile["tone_da"] = person_info["tone_da"]
-                    state["profile"] = profile
-                    yield make_event({"type": "person_analyzed", **person_info})
-
-                    reply = (
-                        f"Mình đã phân tích xong! Bạn có dáng **{person_info.get('dang_nguoi', 'chưa rõ')}** "
-                        f"với **{person_info.get('tone_da', 'chưa rõ')}**. "
-                        f"{person_info.get('nhan_xet', '')}\n\n"
-                        "Mình đã lưu thông tin này để tư vấn phối đồ phù hợp hơn. "
-                        "Bạn muốn gợi ý outfit cho dịp nào?"
-                    )
-                    async for event in _stream_text(reply):
-                        yield event
-                    state["last_bot_msg"] = reply
-                    yield make_event({"type": "done", "ttft": 0.0, "total": round(time.time() - start_time, 2)})
-                    return
-
-                image_search_docs = await asyncio.to_thread(search_products_by_image, tmp_path)
-                if image_search_docs:
-                    force_image_search = True
-                    final_query = f"Find products similar to the uploaded image. Extra request: {message}"
+                    telemetry.finish("vlm_profile_analysis", stage_started)
+                    telemetry.add_call("vlm")
+                    candidate = sanitize_profile_candidate(person_info)
+                    state["pending_profile_candidate"] = candidate
                     yield make_event(
                         {
-                            "type": "product_images",
-                            "images": _docs_to_images(image_search_docs),
+                            "type": "profile_candidate",
+                            "candidate": candidate,
+                            "comment": person_info.get("nhan_xet", ""),
+                            "saved": False,
                         }
                     )
+                    if decision.action != "analyze_then_style":
+                        reply = (
+                            f"Qua bức ảnh, mình thấy vóc dáng của bạn có thể là **{candidate.get('dang_nguoi', 'chưa rõ')}**, "
+                            f"với **{candidate.get('tone_da', 'tone da chưa rõ')}**. "
+                            f"{person_info.get('nhan_xet', '')}\n\n"
+                            "Nhận xét từ ảnh đôi khi chưa hoàn toàn chính xác. Bạn thấy kết quả này có đúng với mình không? "
+                            "Nếu bạn đồng ý, mình sẽ ghi nhớ để những lần tư vấn sau phù hợp hơn."
+                        )
+                        yield make_event(
+                            _decision_event(
+                                decision,
+                                profile.get("gender", "unknown"),
+                                developer_mode,
+                            )
+                        )
+                        yield make_event(
+                            {
+                                "type": "clarification",
+                                "question": "Bạn có đồng ý lưu kết quả phân tích này không?",
+                                "options": [
+                                    {"label": "Đúng rồi, hãy ghi nhớ", "value": "Đồng ý lưu thông tin"},
+                                    {"label": "Chưa đúng, bỏ qua", "value": "Không lưu"},
+                                ],
+                            }
+                        )
+                        async for event in _stream_text(reply):
+                            yield event
+                        state["last_bot_msg"] = reply
+                        yield make_event(done_payload())
+                        return
+                    temporary_profile = {**profile, **candidate}
+                    final_query = message or "Gợi ý outfit phù hợp với profile vừa phân tích"
+                elif not decision.needs_clarification:
                     yield make_event(
                         {
-                            "type": "image_search_ready",
-                            "count": len(image_search_docs),
+                            "type": "progress",
+                            "phase": "image_retrieval",
+                            "message": "Mình đang tìm những món có kiểu dáng gần giống...",
+                            "status": "active",
                         }
                     )
-                else:
-                    caption = await asyncio.to_thread(caption_product_image, tmp_path, message)
-                    yield make_event({"type": "product_captioned", "caption": caption})
-                    final_query = f"{caption}. Extra request: {message}" if message else caption
+                    stage_started = telemetry.begin()
+                    image_search_docs = await asyncio.to_thread(search_products_by_image, tmp_path)
+                    telemetry.finish("image_retrieval", stage_started)
+                    telemetry.add_call("fashionclip_image")
+                    state["pending_image_context"] = dict(decision.image_context or {})
+                    state["pending_image_docs"] = image_search_docs
+                    if image_search_docs:
+                        is_outfit_image = decision.route == ROUTE_IMAGE_OUTFIT_ADVICE
+                        card_docs = image_search_docs[:1] if is_outfit_image else image_search_docs
+                        # Với outfit ảnh, chỉ giữ một catalog match làm món gốc.
+                        yield make_event(
+                            {
+                                "type": "product_images",
+                                "images": _docs_to_images(card_docs),
+                                "source": "image_retrieval",
+                                "group": "source_item" if is_outfit_image else "search_results",
+                                "replace": True,
+                            }
+                        )
+                        yield make_event(
+                            {
+                                "type": "image_search_ready",
+                                "count": len(image_search_docs),
+                                "route": decision.route,
+                            }
+                        )
+                    if developer_mode:
+                        yield make_event({"type": "stage_metrics", **telemetry.snapshot()})
             except Exception as exc:
                 yield make_event({"type": "error", "message": f"Lỗi xử lý ảnh: {exc}"})
                 return
@@ -252,164 +478,234 @@ async def chat(
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
 
-        if not final_query.strip() and not image_search_docs:
-            reply = get_clarify_response()
+        # Text follow-up có thể tiếp tục dùng candidates của ảnh ở lượt trước.
+        if not image_present and decision.route == ROUTE_IMAGE_OUTFIT_ADVICE:
+            image_search_docs = list(state.get("pending_image_docs") or [])
+
+        active_query = final_query.strip()
+        current_gender = await asyncio.to_thread(detect_gender, active_query)
+        if current_gender in {"male", "female"}:
+            profile["gender"] = current_gender
+            state["profile"] = profile
+        gender = profile.get("gender", "female")
+        yield make_event(_decision_event(decision, gender, developer_mode))
+
+        if decision.handler == "profile_management":
+            reply, profile = apply_profile_decision(decision, state)
+            yield make_event({"type": "profile_updated", "action": decision.action, "profile": profile})
             async for event in _stream_text(reply):
                 yield event
             state["last_bot_msg"] = reply
-            yield make_event({"type": "done", "ttft": 0.0, "total": round(time.time() - start_time, 2)})
+            yield make_event(done_payload())
             return
 
-        is_valid, validation_message = validate_user_query(final_query)
-        if not is_valid:
-            async for event in _stream_text(validation_message):
+        if decision.handler == "social":
+            if decision.entities.get("clear_pending_image"):
+                state["pending_image_context"] = None
+                state["pending_image_docs"] = []
+            reply = get_social_response(decision.action)
+            async for event in _stream_text(reply):
                 yield event
-            state["last_bot_msg"] = validation_message
-            yield make_event({"type": "done", "ttft": 0.0, "total": round(time.time() - start_time, 2)})
+            state["last_bot_msg"] = reply
+            yield make_event(done_payload())
             return
 
-        decision = await asyncio.to_thread(
-            route_user_request,
-            final_query,
-            last_bot_msg,
-            state,
-            force_image_search,
-        )
-        intent = decision.intent
-        active_query = decision.rewrite_query or final_query
-        grounding_route = decision.route
+        if decision.handler == "out_of_scope":
+            reply = get_out_of_scope_response(active_query)
+            async for event in _stream_text(reply):
+                yield event
+            state["last_bot_msg"] = reply
+            yield make_event(done_payload())
+            return
 
-        current_gender = await asyncio.to_thread(detect_gender, active_query)
-        if current_gender == "male":
-            profile["gender"] = "male"
-        gender = profile.get("gender") or "female"
-        state["profile"] = profile
-
-        yield make_event(
-            {
-                "type": "route_detected",
-                "route": decision.route,
-                "action": decision.action,
-                "intent": intent,
-                "source": decision.source,
-                "gender": gender,
-            }
-        )
-
-        if intent != "clarify":
-            state["unclear_count"] = 0
-
-        simple_reply = None
-        if intent == "greeting":
-            simple_reply = get_greeting_response()
-        elif intent == "chitchat":
-            simple_reply = get_chitchat_response(active_query)
-        elif intent == "profile_inquiry":
-            simple_reply = get_profile_inquiry_response(profile)
-        elif intent == "out_of_scope":
-            simple_reply = get_out_of_scope_response(active_query)
-        elif intent == "clarify":
+        if decision.handler == "clarify":
             state["unclear_count"] = state.get("unclear_count", 0) + 1
-            if state["unclear_count"] >= 2:
-                decision.route = ROUTE_PRODUCT_SEARCH
-                decision.action = "fallback_after_unclear"
-                intent = "search"
-                grounding_route = decision.route
-            else:
-                simple_reply = get_clarify_response(decision)
-
-        if simple_reply is not None:
-            async for event in _stream_text(simple_reply):
+            reply = get_clarify_response(decision)
+            yield make_event(
+                {
+                    "type": "clarification",
+                    "question": reply,
+                    "options": decision.clarification_options,
+                    "missing_slots": decision.missing_slots,
+                }
+            )
+            async for event in _stream_text(reply):
                 yield event
-            state["last_bot_msg"] = simple_reply
-            yield make_event({"type": "done", "ttft": 0.0, "total": round(time.time() - start_time, 2)})
+            state["last_bot_msg"] = reply
+            yield make_event(done_payload())
             return
 
+        state["unclear_count"] = 0
+        execution_handler = "outfit" if decision.action == "analyze_then_style" else decision.handler
         chain = None
         chain_input = None
         chain_type = "llm"
 
         try:
-            if intent == "image_search":
+            if execution_handler == "image_search":
                 from app.core.chains import get_product_answer_chain
                 from app.core.llm import format_documents_for_llm
 
-                retrieved_docs = image_search_docs
-                allowed_product_ids = extract_product_ids_from_docs(image_search_docs)
-                chain = get_product_answer_chain()
-                chain_input = {
-                    "input": active_query,
-                    "context": format_documents_for_llm(image_search_docs),
-                }
-                chain_type = "llm"
-
-            if intent == "outfit":
-                from app.core.chains import get_outfit_chain
-                from app.core.outfit import build_outfit_context
-
-                outfit_context, outfit_images = await asyncio.to_thread(
-                    build_outfit_context,
-                    active_query,
-                    gender,
-                    profile,
+                yield make_event(
+                    {
+                        "type": "progress",
+                        "phase": "generation",
+                        "message": "Mình đang chọn ra vài mẫu gần giống nhất...",
+                        "status": "active",
+                    }
                 )
-                if not outfit_context:
-                    fallback = "Mình chưa có công thức phối đồ thật khớp cho yêu cầu này, nhưng để mình tìm sản phẩm phù hợp cho bạn nhé. "
-                    yield make_event({"type": "token", "content": fallback})
-                    response_tokens.append(fallback)
-                    intent = "search"
-                    decision.route = ROUTE_PRODUCT_SEARCH
-                    decision.action = "fallback_search"
-                    grounding_route = decision.route
-                else:
-                    if outfit_images:
-                        yield make_event({"type": "product_images", "images": outfit_images})
-                    allowed_product_ids = extract_product_ids_from_text(outfit_context)
-                    chain = get_outfit_chain()
-                    chain_input = {"input": active_query, "outfit_context": outfit_context}
-                    chain_type = "llm"
 
-            if intent == "search":
-                # Use fast chain: active_query is already rewritten by the keyword router /
-                # LLM router (decision.rewrite_query), so we skip the extra LLM rewrite step.
+                if not image_search_docs:
+                    reply = "Mình chưa tìm thấy sản phẩm đủ giống ảnh trong dữ liệu hiện tại."
+                    async for event in _stream_text(reply):
+                        yield event
+                    state["last_bot_msg"] = reply
+                    yield make_event(done_payload())
+                    return
+                retrieved_docs = image_search_docs
+                allowed_product_ids = extract_product_ids_from_docs(retrieved_docs)
+                chain = get_product_answer_chain()
+                chain_input = {"input": active_query, "context": format_documents_for_llm(retrieved_docs)}
+
+            elif execution_handler == "outfit":
+                from app.core.chains import get_outfit_chain
+                from app.core.outfit import build_outfit_context, build_outfit_context_from_image_docs
+
+                yield make_event(
+                    {
+                        "type": "progress",
+                        "phase": "outfit_retrieval",
+                        "message": "Mình đang chọn các món có thể kết hợp thật hài hòa...",
+                        "status": "active",
+                    }
+                )
+
+                effective_profile = temporary_profile or profile
+                outfit_metrics: dict = {}
+                stage_started = telemetry.begin()
+                if decision.route == ROUTE_IMAGE_OUTFIT_ADVICE and image_search_docs:
+                    outfit_context, outfit_images, diagnostics = await asyncio.to_thread(
+                        build_outfit_context_from_image_docs,
+                        image_search_docs,
+                        active_query,
+                        gender,
+                        effective_profile,
+                        outfit_metrics,
+                    )
+                    yield make_event({"type": "image_item_context", **diagnostics})
+                else:
+                    outfit_context, outfit_images = await asyncio.to_thread(
+                        build_outfit_context,
+                        active_query,
+                        gender,
+                        effective_profile,
+                        outfit_metrics,
+                    )
+                telemetry.finish("outfit_retrieval", stage_started)
+                telemetry.merge_calls(outfit_metrics.get("model_calls"))
+                telemetry.merge_vectors(outfit_metrics.get("model_vectors"))
+                for name, elapsed in outfit_metrics.get("timings", {}).items():
+                    telemetry.timings[f"outfit.{name}"] = elapsed
+                if not outfit_context:
+                    reply = "Mình chưa tìm được công thức phối đồ đủ khớp yêu cầu này. Bạn có thể nói rõ dịp sử dụng hoặc phong cách mong muốn."
+                    async for event in _stream_text(reply):
+                        yield event
+                    yield make_event(done_payload())
+                    return
+                if outfit_images:
+                    yield make_event(
+                        {
+                            "type": "product_images",
+                            "images": _normalize_product_cards(outfit_images),
+                            "source": "outfit_retrieval",
+                            "group": "outfit",
+                            "replace": True,
+                        }
+                    )
+                if developer_mode:
+                    yield make_event({"type": "stage_metrics", **telemetry.snapshot()})
+                allowed_product_ids = extract_product_ids_from_text(outfit_context)
+                chain = get_outfit_chain()
+                chain_input = {"input": active_query, "outfit_context": outfit_context}
+
+            elif execution_handler == "search":
                 from app.core.chains import get_fast_search_chain
 
+                filter_summary = decision.entities or {}
+                yield make_event(
+                    {
+                        "type": "progress",
+                        "phase": "product_retrieval",
+                        "message": _retrieval_progress_message(filter_summary),
+                        "status": "active",
+                        "filters": filter_summary,
+                    }
+                )
+
+                if decision.action == "stock_check":
+                    notice = "Lưu ý: hệ thống chưa có dữ liệu tồn kho thời gian thực; mình chỉ có thể tìm sản phẩm liên quan để bạn tham khảo.\n\n"
+                    response_tokens.append(notice)
+                    yield make_event({"type": "token", "content": notice})
                 chain = get_fast_search_chain()
                 chain_input = {"input": active_query}
                 chain_type = "search"
 
             if chain is None or chain_input is None:
-                yield make_event({"type": "error", "message": "Không xác định được luồng xử lý phù hợp."})
+                yield make_event({"type": "error", "message": "Không xác định được pipeline thực thi."})
                 return
+
+            if chain_type != "search":
+                yield make_event(
+                    {
+                        "type": "progress",
+                        "phase": "generation",
+                        "message": "Mình đang chuẩn bị lời tư vấn dành riêng cho bạn...",
+                        "status": "active",
+                    }
+                )
 
             config = {"configurable": {"session_id": session_id}}
             token_queue: queue.Queue = queue.Queue()
+            telemetry.add_call("llm_answer")
+            generation_started = telemetry.begin()
             worker = threading.Thread(
                 target=_stream_chain_via_queue,
                 args=(chain, chain_input, config, token_queue, chain_type),
                 daemon=True,
             )
             worker.start()
-
             while True:
                 try:
-                    item = await asyncio.to_thread(token_queue.get, timeout=60)
-                except Exception:
+                    item = await asyncio.to_thread(token_queue.get, True, 60)
+                except queue.Empty:
                     yield make_event({"type": "error", "message": "Timeout chờ phản hồi từ LLM."})
                     break
-
                 if item is None:
                     break
                 if not item.get("ok", False):
                     yield make_event({"type": "error", "message": item.get("error", "Lỗi không xác định")})
                     break
-
-                item_type = item.get("item_type", "token")
-                if item_type == "context":
+                if item.get("item_type") == "context":
                     retrieved_docs = item.get("docs", [])
                     allowed_product_ids = extract_product_ids_from_docs(retrieved_docs)
                     if item.get("images"):
-                        yield make_event({"type": "product_images", "images": item["images"]})
+                        yield make_event(
+                            {
+                                "type": "product_images",
+                                "images": item["images"],
+                                "source": "text_retrieval",
+                                "group": "search_results",
+                                "replace": True,
+                            }
+                        )
+                    yield make_event(
+                        {
+                            "type": "progress",
+                            "phase": "generation",
+                            "message": "Mình đang xem lại các lựa chọn trước khi gửi bạn...",
+                            "status": "active",
+                        }
+                    )
                 else:
                     token = item.get("content", "")
                     if first_token_time is None:
@@ -417,60 +713,81 @@ async def chat(
                     response_tokens.append(token)
                     yield make_event({"type": "token", "content": token})
                 await asyncio.sleep(0)
-
             worker.join(timeout=1)
+            telemetry.finish("answer_chain", generation_started)
+
+            if decision.follow_up_question:
+                follow_up = "\n\n" + decision.follow_up_question
+                response_tokens.append(follow_up)
+                yield make_event({"type": "token", "content": follow_up})
+                yield make_event(
+                    {
+                        "type": "suggested_follow_up",
+                        "question": decision.follow_up_question,
+                        "options": decision.follow_up_options,
+                    }
+                )
+
+            if decision.action == "analyze_then_style":
+                reminder = "\n\nKết quả profile vẫn chưa được lưu. Bạn có đồng ý lưu không?"
+                response_tokens.append(reminder)
+                yield make_event({"type": "token", "content": reminder})
+                yield make_event(
+                    {
+                        "type": "clarification",
+                        "question": "Bạn có đồng ý lưu profile vừa phân tích không?",
+                        "options": [
+                            {"label": "Đúng rồi, hãy ghi nhớ", "value": "Đồng ý lưu thông tin"},
+                            {"label": "Chưa đúng, bỏ qua", "value": "Không lưu"},
+                        ],
+                    }
+                )
 
             answer_text = "".join(response_tokens)
-            if answer_text and intent in {"search", "image_search", "outfit"}:
-                grounding_report = check_answer_grounding(
-                    answer_text,
-                    allowed_product_ids,
-                    active_query,
-                    grounding_route,
-                )
-            else:
-                grounding_report = {"ok": True, "unknown_product_ids": []}
-
+            grounding_report = check_answer_grounding(
+                answer_text,
+                allowed_product_ids,
+                active_query,
+                decision.route or "",
+            ) if answer_text else {"ok": True, "unknown_product_ids": []}
             end_time = time.time()
-            if first_token_time is None:
-                first_token_time = end_time
+            first_token_time = first_token_time or end_time
 
+            telemetry_snapshot = telemetry.snapshot()
             append_chat_turn_log(
                 {
                     "session_id": session_id,
                     "raw_query": message or "",
                     "query": active_query,
-                    "route": decision.route,
+                    "intent": decision.intent,
+                    "modality": decision.modality,
                     "action": decision.action,
-                    "intent": intent,
+                    "route": decision.route,
+                    "handler": execution_handler,
                     "source": decision.source,
                     "route_confidence": decision.confidence,
                     "route_reason": decision.reason,
-                    "retrieved_count": len(retrieved_docs) if retrieved_docs else len(allowed_product_ids),
+                    "router_trace": decision.trace,
+                    "retrieved_count": len(retrieved_docs) or len(allowed_product_ids),
                     "retrieved_product_ids": sorted(allowed_product_ids),
                     "ttft_sec": round(first_token_time - start_time, 4),
                     "total_sec": round(end_time - start_time, 4),
                     "reranker_enabled": _is_reranker_enabled(),
                     "grounding_ok": grounding_report.get("ok", True),
                     "unknown_ids": grounding_report.get("unknown_product_ids", []),
+                    **telemetry_snapshot,
                 }
             )
 
-            if intent in {"search", "image_search", "outfit"}:
-                state["last_route_decision"] = decision
-                state["last_query"] = active_query
+            state["last_route_decision"] = decision
+            state["last_query"] = active_query
             if answer_text:
                 state["last_bot_msg"] = answer_text[-1200:]
-
-            yield make_event(
-                {
-                    "type": "done",
-                    "ttft": round(first_token_time - start_time, 2),
-                    "total": round(end_time - start_time, 2),
-                    "grounding_ok": grounding_report.get("ok", True),
-                }
-            )
-
+            yield make_event(done_payload(
+                first_token_time - start_time,
+                grounding_ok=grounding_report.get("ok", True),
+                retrieved_count=len(retrieved_docs) or len(allowed_product_ids),
+            ))
         except Exception as exc:
             yield make_event({"type": "error", "message": str(exc)})
 
@@ -496,8 +813,4 @@ async def serve_index():
 
 @app.get("/api/health")
 async def health():
-    return {
-        "status": "ok",
-        "initialized": True,
-        "mode": "research_demo_v3_lazy",
-    }
+    return {"status": "ok", "initialized": True, "mode": "research_demo_v3_lazy"}

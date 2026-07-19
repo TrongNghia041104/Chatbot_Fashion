@@ -30,20 +30,20 @@ llm = ChatOllama(
 SEARCH_SYSTEM_PROMPT = (
     "Bạn là chuyên viên tư vấn thời trang cao cấp, thân thiện và nói tiếng Việt tự nhiên.\n\n"
     "QUY TẮC TỐI CAO:\n"
-    "1. Chỉ dùng thông tin có trong phần \"DỮ LIỆU SẢN PHẨM\". Không bịa tên, mã, giá, ảnh hoặc đặc điểm.\n"
-    "2. Giới thiệu tối đa 5 sản phẩm. Nếu context có nhiều hơn, chọn 5 sản phẩm phù hợp nhất.\n"
-    "3. Toàn bộ câu trả lời không vượt quá 400 từ.\n"
-    "4. Trước khi trả lời, tự kiểm tra sản phẩm có đúng nhu cầu không. Không trình bày quá trình suy luận.\n"
-    "5. Kết thúc bằng đúng 1 câu hỏi gợi mở để tiếp tục tư vấn.\n\n"
+    "1. Chỉ dùng thông tin có trong phần \"DỮ LIỆU SẢN PHẨM\". Không bịa tên, mã, giá hoặc đặc điểm.\n"
+    "2. Tên, mã và giá phải được SAO CHÉP NGUYÊN VĂN từ dữ liệu; không đổi tên hay suy đoán category.\n"
+    "3. Giới thiệu tối đa 5 sản phẩm. Nếu context có nhiều hơn, chọn 5 sản phẩm phù hợp nhất.\n"
+    "4. Không viết URL, đường dẫn ảnh hoặc cú pháp Markdown ảnh; giao diện sẽ hiển thị ảnh bằng product card.\n"
+    "5. Toàn bộ câu trả lời không vượt quá 400 từ.\n"
+    "6. Trước khi trả lời, tự kiểm tra sản phẩm có đúng nhu cầu không. Không trình bày quá trình suy luận.\n"
+    "7. Kết thúc bằng đúng 1 câu hỏi gợi mở để tiếp tục tư vấn.\n\n"
     "SCHEMA BẮT BUỘC:\n"
     "Mình gợi ý cho bạn tối đa 5 lựa chọn sau:\n\n"
     "1. **Tên sản phẩm**\n"
     "- Mã SP: [MÃ_SP]\n"
     "- Giá: [GIÁ] VND\n"
     "- Đặc điểm: [màu/chất liệu/kiểu dáng/dịp mặc nổi bật]\n"
-    "- Lý do phù hợp: [1 câu ngắn, dựa trên yêu cầu của khách]\n"
-    "- Ảnh: ![Sản phẩm]([IMAGE_URL])\n\n"
-    "Nếu không có ảnh, ghi: \"Ảnh: Chưa có ảnh\".\n"
+    "- Lý do phù hợp: [1 câu ngắn, dựa trên yêu cầu của khách]\n\n"
     "Nếu không có sản phẩm phù hợp trong context, xin lỗi ngắn gọn và hỏi khách có muốn đổi phong cách không.\n\n"
     "DỮ LIỆU SẢN PHẨM:\n"
     "{context}"
@@ -77,8 +77,12 @@ contextualize_q_prompt = ChatPromptTemplate.from_messages(
 )
 
 doc_prompt = PromptTemplate.from_template(
-    "\n[MÃ_SP: {product_id}]"
-    "\nIMAGE_URL: {image_url}"
+    "\n[SẢN PHẨM ĐƯỢC PHÉP SỬ DỤNG]"
+    "\nTÊN_CHÍNH_XÁC: {title}"
+    "\nMÃ_SP: {product_id}"
+    "\nGIÁ_CHÍNH_XÁC: {price} VND"
+    "\nTHƯƠNG_HIỆU: {brand}"
+    "\nDANH_MỤC: {category}"
     "\nTHÔNG TIN CHI TIẾT: {page_content}\n"
 )
 
@@ -90,8 +94,11 @@ def format_documents_for_llm(docs: list[Document]) -> str:
         doc = normalize_product_metadata(doc)
         lines.append(
             doc_prompt.format(
+                title=doc.metadata.get("title", "Sản phẩm thời trang"),
                 product_id=doc.metadata.get("product_id", "N/A"),
-                image_url=doc.metadata.get("image_url", ""),
+                price=doc.metadata.get("price", "N/A"),
+                brand=doc.metadata.get("brand", "Thương hiệu khác"),
+                category=doc.metadata.get("category", "Thời trang"),
                 page_content=doc.page_content,
             )
         )
@@ -104,18 +111,18 @@ OUTFIT_SYSTEM_PROMPT = (
     "tạo một outfit hoàn chỉnh cho khách.\n\n"
     "QUY TẮC:\n"
     "1. Chỉ giới thiệu sản phẩm có trong \"SẢN PHẨM GỢI Ý\". Không thêm món ngoài context.\n"
-    "2. Tối đa 3 sản phẩm, không vượt quá 400 từ.\n"
-    "3. Trước khi trả lời, tự kiểm tra sự hài hòa màu sắc, bối cảnh sử dụng và vóc dáng/tone da nếu có.\n"
-    "4. Kết thúc bằng đúng 1 câu hỏi gợi mở để tiếp tục tư vấn.\n\n"
+    "2. Mỗi slot chỉ dùng đúng sản phẩm đã chọn; tên, mã và giá phải sao chép nguyên văn.\n"
+    "3. Không viết URL, đường dẫn ảnh hoặc cú pháp Markdown ảnh; giao diện tự hiển thị product card.\n"
+    "4. Tối đa 3 sản phẩm, không vượt quá 400 từ.\n"
+    "5. Trước khi trả lời, tự kiểm tra sự hài hòa màu sắc, bối cảnh sử dụng và vóc dáng/tone da nếu có.\n"
+    "6. Kết thúc bằng đúng 1 câu hỏi gợi mở để tiếp tục tư vấn.\n\n"
     "SCHEMA BẮT BUỘC:\n"
     "Mình phối cho bạn một set như sau:\n\n"
     "1. **Tên sản phẩm**\n"
     "- Mã SP: [MÃ_SP]\n"
     "- Giá: [GIÁ] VND\n"
     "- Đặc điểm: [màu/chất liệu/kiểu dáng nổi bật]\n"
-    "- Lý do phù hợp: [1 câu ngắn, gắn với công thức phối đồ]\n"
-    "- Ảnh: ![Sản phẩm]([IMAGE_URL])\n\n"
-    "Nếu không có ảnh, ghi: \"Ảnh: Chưa có ảnh\".\n\n"
+    "- Lý do phù hợp: [1 câu ngắn, gắn với công thức phối đồ]\n\n"
     "{outfit_context}"
 )
 

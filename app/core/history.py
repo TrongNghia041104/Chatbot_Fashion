@@ -2,7 +2,7 @@
 app/core/history.py — Redis Chat History với Summarization
 ============================================================
 Quản lý lịch sử hội thoại qua Redis.
-Tự động tóm tắt khi lịch sử vượt ngưỡng để giữ context window nhỏ gọn.
+Mặc định giữ một cửa sổ gần; có thể bật tóm tắt bằng biến môi trường.
 """
 
 import ollama
@@ -10,13 +10,17 @@ from langchain_community.chat_message_histories import RedisChatMessageHistory
 from langchain_core.messages import SystemMessage
 
 from app.config import (
-    REDIS_URL,
-    LLM_MODEL,
+    HISTORY_ENABLE_SUMMARIZATION,
     HISTORY_MAX_MESSAGES,
     HISTORY_RECENT_KEEP,
     SUMMARIZE_MAX_TOKENS,
+    LLM_MODEL,
+    OLLAMA_BASE_URL,
+    REDIS_URL,
 )
 from app.core.llm import SUMMARIZE_PROMPT
+
+ollama_client = ollama.Client(host=OLLAMA_BASE_URL)
 
 
 def summarize_history(messages: list) -> str:
@@ -33,7 +37,7 @@ def summarize_history(messages: list) -> str:
         f"{'Khách' if m.type == 'human' else 'Bot'}: {m.content[:300]}"
         for m in messages
     ])
-    resp = ollama.chat(
+    resp = ollama_client.chat(
         model=LLM_MODEL,
         messages=[{
             "role": "user",
@@ -49,8 +53,9 @@ def get_message_history(session_id: str) -> RedisChatMessageHistory:
     Lấy lịch sử hội thoại từ Redis, có auto-summarization.
 
     Chiến lược:
-    - Dưới HISTORY_MAX_MESSAGES: giữ nguyên, không tóm tắt.
-    - Trên HISTORY_MAX_MESSAGES: tóm tắt phần cũ, giữ HISTORY_RECENT_KEEP messages gần nhất.
+    - Dưới HISTORY_MAX_MESSAGES: giữ nguyên.
+    - Trên ngưỡng: giữ HISTORY_RECENT_KEEP message gần nhất.
+    - Chỉ gọi LLM tóm tắt nếu HISTORY_ENABLE_SUMMARIZATION=True.
 
     Args:
         session_id: ID phiên hội thoại.
@@ -65,16 +70,16 @@ def get_message_history(session_id: str) -> RedisChatMessageHistory:
     if len(messages) <= HISTORY_MAX_MESSAGES:
         return history
 
-    # Vượt ngưỡng → tóm tắt phần cũ, giữ messages gần nhất
+    # Vượt ngưỡng → mặc định chỉ giữ cửa sổ gần để không phát sinh thêm LLM call.
     old_messages    = messages[:-HISTORY_RECENT_KEEP]
     recent_messages = messages[-HISTORY_RECENT_KEEP:]
 
-    summary_text = summarize_history(old_messages)
-
     history.clear()
-    history.add_message(SystemMessage(
-        content=f"[TÓM TẮT HỘI THOẠI TRƯỚC]: {summary_text}",
-    ))
+    if HISTORY_ENABLE_SUMMARIZATION:
+        summary_text = summarize_history(old_messages)
+        history.add_message(SystemMessage(
+            content=f"[TÓM TẮT HỘI THOẠI TRƯỚC]: {summary_text}",
+        ))
     history.add_messages(recent_messages)
 
     return history

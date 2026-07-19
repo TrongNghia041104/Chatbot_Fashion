@@ -105,10 +105,10 @@ class Stage2StudentProjection(nn.Module):
 class BGEM3Embeddings(Embeddings):
     """BGE-M3 wrapper for Layer B outfit-rule embeddings."""
 
-    def __init__(self, model_name: str = EMBEDDING_MODEL):
+    def __init__(self, model_name: str = EMBEDDING_MODEL, base_url: str = OLLAMA_BASE_URL):
         self.ollama_embeddings = OllamaEmbeddings(
             model=model_name,
-            base_url=OLLAMA_BASE_URL,
+            base_url=base_url,
         )
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:

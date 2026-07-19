@@ -39,8 +39,15 @@ class FashionCLIPImageEmbeddings:
         self.batch_size = batch_size
         self.model_name = model_name
 
-        self.processor = CLIPProcessor.from_pretrained(model_name)
-        self.model = CLIPModel.from_pretrained(model_name).to(self.device).eval()
+        try:
+            # Ưu tiên cache local để buổi demo không phụ thuộc kết nối Hugging Face.
+            self.processor = CLIPProcessor.from_pretrained(model_name, local_files_only=True)
+            self.model = CLIPModel.from_pretrained(model_name, local_files_only=True)
+        except OSError:
+            print("[WARN] FashionCLIP cache chưa đầy đủ; đang tải phần còn thiếu từ Hugging Face...")
+            self.processor = CLIPProcessor.from_pretrained(model_name)
+            self.model = CLIPModel.from_pretrained(model_name)
+        self.model = self.model.to(self.device).eval()
         for param in self.model.parameters():
             param.requires_grad = False
 

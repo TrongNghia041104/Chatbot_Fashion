@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from threading import Lock
+from threading import Lock, RLock
 from typing import Any
 
 import torch
@@ -45,7 +45,11 @@ _vector_db: QdrantVectorStore | None = None
 _retriever: BaseRetriever | None = None
 _product_reranker = None
 _reranker_enabled = ENABLE_PRODUCT_RERANKER
-_lock = Lock()
+# get_product_retriever() có thể gọi tiếp get_product_vector_db() trong cùng
+# critical section, nên cần re-entrant lock để không tự deadlock ở request đầu.
+_lock = RLock()
+_layer_b_lock = Lock()
+_layer_b_ready = False
 
 
 def get_qdrant_client() -> QdrantClient:
@@ -78,12 +82,27 @@ def _collection_exists(collection_name: str) -> bool:
         return collection_name in [c.name for c in qdrant.get_collections().collections]
 
 
-def index_layer_b(data: list[dict], collection_name: str) -> None:
+def build_layer_b_embedding_text(rule: dict) -> str:
+    """Build the semantic text indexed for one Layer B styling rule."""
+    return " ".join(
+        [
+            str(rule.get("rule_key", "")),
+            str(rule.get("phong_cach", "")),
+            str(rule.get("boi_canh", "")),
+            str(rule.get("ly_do_tu_van", "")),
+        ]
+    ).strip()
+
+
+def index_layer_b(data: list[dict], collection_name: str, recreate: bool = False) -> None:
     """Index outfit-rule knowledge into Qdrant if the collection is missing."""
     qdrant = get_qdrant_client()
     if _collection_exists(collection_name):
-        print(f"[SKIP] {collection_name} already exists.")
-        return
+        if recreate:
+            qdrant.delete_collection(collection_name)
+        else:
+            print(f"[SKIP] {collection_name} already exists.")
+            return
 
     qdrant.create_collection(
         collection_name=collection_name,
@@ -92,25 +111,67 @@ def index_layer_b(data: list[dict], collection_name: str) -> None:
     rule_embeddings = get_rule_embeddings()
     points = []
     for i, rule in enumerate(data):
-        text = f"{rule['rule_key']} {rule['phong_cach']} {rule['boi_canh']} {rule['ly_do_tu_van']}"
+        text = build_layer_b_embedding_text(rule)
         points.append(PointStruct(id=i, vector=rule_embeddings.embed_query(text), payload=rule))
     qdrant.upsert(collection_name=collection_name, points=points)
     print(f"[OK] Indexed {len(points)} Layer B rules -> {collection_name}")
 
 
 def ensure_layer_b_indexed() -> None:
-    """Create Layer B collections on demand. Skips quickly when they already exist."""
-    index_layer_b(layer_b_female, QDRANT_COLLECTION_LAYER_B_F)
-    index_layer_b(layer_b_male, QDRANT_COLLECTION_LAYER_B_M)
+    """Verify Layer B collections once per process and create them if missing."""
+    global _layer_b_ready
+    if _layer_b_ready:
+        return
+    with _layer_b_lock:
+        if _layer_b_ready:
+            return
+        index_layer_b(layer_b_female, QDRANT_COLLECTION_LAYER_B_F)
+        index_layer_b(layer_b_male, QDRANT_COLLECTION_LAYER_B_M)
+        _layer_b_ready = True
 
 
 def normalize_product_metadata(doc: Document) -> Document:
-    """Ensure each product document has a stable image_url for rendering."""
+    """Ensure each product document has stable image paths for rendering."""
     images = doc.metadata.get("images", [])
     if isinstance(images, str):
-        images = [images] if images else []
-    doc.metadata["images"] = images
-    doc.metadata["image_url"] = doc.metadata.get("image_url") or (images[0] if images else "")
+        text = images.strip()
+        if text.startswith(("[", "{")):
+            try:
+                images = json.loads(text)
+            except json.JSONDecodeError:
+                images = [images] if images else []
+        else:
+            images = [images] if images else []
+    if isinstance(images, dict):
+        images = [images]
+
+    normalized_images: list[str] = []
+    for image in images or []:
+        if isinstance(image, dict):
+            value = (
+                image.get("large")
+                or image.get("hi_res")
+                or image.get("url")
+                or image.get("image_url")
+                or image.get("path")
+            )
+        else:
+            value = image
+        value = str(value or "").strip()
+        if value and value not in normalized_images:
+            normalized_images.append(value)
+
+    main_image = str(
+        doc.metadata.get("image_url")
+        or doc.metadata.get("main_image_relpath")
+        or doc.metadata.get("main_image_path")
+        or ""
+    ).strip()
+    if not main_image and normalized_images:
+        main_image = normalized_images[0]
+
+    doc.metadata["images"] = normalized_images
+    doc.metadata["image_url"] = main_image
     return doc
 
 
