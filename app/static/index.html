@@ -293,7 +293,7 @@
     <div class="diag-body">
       <section class="diag-section"><div class="diag-label">Router decision</div><div class="diag-grid">
         <div class="diag-metric"><small>Intent</small><strong id="diag-intent">—</strong></div><div class="diag-metric"><small>Route</small><strong id="diag-route">—</strong></div>
-        <div class="diag-metric"><small>Action</small><strong id="diag-action">—</strong></div><div class="diag-metric"><small>Confidence</small><strong id="diag-confidence">—</strong></div>
+        <div class="diag-metric"><small>Action</small><strong id="diag-action">—</strong></div><div class="diag-metric"><small>Mức xác định</small><strong id="diag-confidence">—</strong></div>
         <div class="diag-metric"><small>Modality</small><strong id="diag-modality">—</strong></div><div class="diag-metric"><small>Source</small><strong id="diag-source">—</strong></div>
       </div></section>
       <section class="diag-section"><div class="diag-label">Model calls trong lượt này</div><pre class="json-box" id="diag-model-calls">{}</pre></section>
@@ -383,7 +383,7 @@
     function toggleDeveloperMode(force){developerMode=typeof force==='boolean'?force:!developerMode;elements.devToggle.classList.toggle('active',developerMode);elements.drawer.classList.toggle('open',developerMode);elements.backdrop.classList.toggle('open',developerMode);if(developerMode)toast('Đã mở thông tin dành cho buổi bảo vệ');}
     function diagnosticEvent(event){if(!developerMode||event.type==='token')return;const time=new Date().toLocaleTimeString('vi-VN',{hour12:false});const row=document.createElement('div');row.className='event-row';row.innerHTML=`<span class="event-time">${time}</span><span class="event-content">${escapeHtml(event.type)} · ${escapeHtml(event.message||event.phase||event.route||'event')}</span>`;document.getElementById('event-list').prepend(row);while(document.getElementById('event-list').children.length>40)document.getElementById('event-list').lastChild.remove();}
     function updateDiagnostics(event){
-      ['intent','route','action','modality','source'].forEach(key=>document.getElementById('diag-'+key).textContent=event[key]??'—');document.getElementById('diag-confidence').textContent=event.confidence==null?'—':`${Math.round(event.confidence*100)}%`;document.getElementById('diag-filters').textContent=JSON.stringify(event.entities||{},null,2);document.getElementById('diag-trace').textContent=JSON.stringify(event.trace||[],null,2);
+      ['intent','route','action','modality','source'].forEach(key=>document.getElementById('diag-'+key).textContent=event[key]??'—');document.getElementById('diag-confidence').textContent=event.certainty??'—';document.getElementById('diag-filters').textContent=JSON.stringify(event.entities||{},null,2);document.getElementById('diag-trace').textContent=JSON.stringify(event.trace||[],null,2);
     }
     function updateStageMetrics(event){
       if(!developerMode)return;document.getElementById('diag-model-calls').textContent=JSON.stringify(event.model_calls||{},null,2);document.getElementById('diag-model-vectors').textContent=JSON.stringify(event.model_vectors||{},null,2);document.getElementById('diag-timings').textContent=JSON.stringify(event.timings||{},null,2);

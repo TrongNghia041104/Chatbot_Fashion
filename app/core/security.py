@@ -26,6 +26,20 @@ PRODUCT_ID_EXTRACT_PATTERNS = [
     r"\[MA_SP:\s*([A-Za-z0-9_\-]{4,40})\]",
 ]
 
+GENERATED_COMMERCE_FACT_PREFIXES = (
+    "mã sp:",
+    "ma sp:",
+    "mã sản phẩm:",
+    "ma san pham:",
+    "product id:",
+    "giá:",
+    "gia:",
+    "thương hiệu:",
+    "thuong hieu:",
+    "ảnh:",
+    "anh:",
+)
+
 
 def validate_user_query(query: str) -> tuple[bool, str]:
     """Validate text length and common prompt-injection patterns."""
@@ -80,6 +94,48 @@ def check_answer_grounding(answer: str, allowed_product_ids: set[str], query: st
             handle.write(json.dumps(report, ensure_ascii=False) + "\n")
         print(f"[WARN] Grounding check: unknown product IDs {unknown}")
     return report
+
+
+class CommerceFactStreamFilter:
+    """Remove generated commerce-fact lines before they reach the browser.
+
+    Product cards are serialized directly from retrieved documents and are the
+    single source of truth for ID, price, brand and images. The LLM may explain
+    why an item fits, but it must not restate those fragile fields. Buffering is
+    line-based so a label split across streaming chunks is still caught.
+    """
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self.removed_lines: list[str] = []
+
+    @staticmethod
+    def _is_generated_fact_line(line: str) -> bool:
+        normalized = line.strip().lower().lstrip("-*• ").strip()
+        return normalized.startswith(GENERATED_COMMERCE_FACT_PREFIXES)
+
+    def feed(self, chunk: str) -> str:
+        """Accept a stream chunk and return only completed, safe lines."""
+        self._buffer += str(chunk or "")
+        safe_parts: list[str] = []
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            complete_line = line + "\n"
+            if self._is_generated_fact_line(line):
+                self.removed_lines.append(line.strip())
+            else:
+                safe_parts.append(complete_line)
+        return "".join(safe_parts)
+
+    def finish(self) -> str:
+        """Flush the final partial line after applying the same policy."""
+        line, self._buffer = self._buffer, ""
+        if not line:
+            return ""
+        if self._is_generated_fact_line(line):
+            self.removed_lines.append(line.strip())
+            return ""
+        return line
 
 
 def append_chat_turn_log(record: dict) -> None:

@@ -217,6 +217,8 @@ def _decision_event(decision, gender: str, include_trace: bool = False) -> dict:
         "route": decision.route,
         "handler": decision.handler,
         "source": decision.source,
+        "certainty": decision.certainty,
+        # Kept for older notebook consumers; certainty is the authoritative field.
         "confidence": decision.confidence,
         "reason": decision.reason,
         "entities": decision.entities,
@@ -267,6 +269,7 @@ async def chat(
         )
         from app.core.profile import apply_profile_decision, sanitize_profile_candidate
         from app.core.security import (
+            CommerceFactStreamFilter,
             append_chat_turn_log,
             check_answer_grounding,
             extract_product_ids_from_docs,
@@ -666,6 +669,7 @@ async def chat(
 
             config = {"configurable": {"session_id": session_id}}
             token_queue: queue.Queue = queue.Queue()
+            fact_filter = CommerceFactStreamFilter()
             telemetry.add_call("llm_answer")
             generation_started = telemetry.begin()
             worker = threading.Thread(
@@ -708,13 +712,30 @@ async def chat(
                     )
                 else:
                     token = item.get("content", "")
-                    if first_token_time is None:
-                        first_token_time = time.time()
-                    response_tokens.append(token)
-                    yield make_event({"type": "token", "content": token})
+                    safe_token = fact_filter.feed(token)
+                    if safe_token:
+                        if first_token_time is None:
+                            first_token_time = time.time()
+                        response_tokens.append(safe_token)
+                        yield make_event({"type": "token", "content": safe_token})
                 await asyncio.sleep(0)
             worker.join(timeout=1)
+            final_safe_token = fact_filter.finish()
+            if final_safe_token:
+                if first_token_time is None:
+                    first_token_time = time.time()
+                response_tokens.append(final_safe_token)
+                yield make_event({"type": "token", "content": final_safe_token})
             telemetry.finish("answer_chain", generation_started)
+
+            if developer_mode and fact_filter.removed_lines:
+                yield make_event(
+                    {
+                        "type": "grounding_filter",
+                        "message": "Đã ẩn các trường thương mại do LLM tự viết; product card là nguồn sự thật.",
+                        "removed_lines": fact_filter.removed_lines,
+                    }
+                )
 
             if decision.follow_up_question:
                 follow_up = "\n\n" + decision.follow_up_question
@@ -765,7 +786,8 @@ async def chat(
                     "route": decision.route,
                     "handler": execution_handler,
                     "source": decision.source,
-                    "route_confidence": decision.confidence,
+                    "route_certainty": decision.certainty,
+                    "route_confidence_legacy": decision.confidence,
                     "route_reason": decision.reason,
                     "router_trace": decision.trace,
                     "retrieved_count": len(retrieved_docs) or len(allowed_product_ids),
@@ -775,6 +797,7 @@ async def chat(
                     "reranker_enabled": _is_reranker_enabled(),
                     "grounding_ok": grounding_report.get("ok", True),
                     "unknown_ids": grounding_report.get("unknown_product_ids", []),
+                    "filtered_commerce_fact_lines": fact_filter.removed_lines,
                     **telemetry_snapshot,
                 }
             )

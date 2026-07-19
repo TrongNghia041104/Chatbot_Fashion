@@ -120,6 +120,27 @@ PROFILE_MANAGEMENT_ACTIONS = {
 }
 SOCIAL_ACTIONS = {"greeting", "thanks", "goodbye", "social"}
 
+# `certainty` describes how the decision was produced. Unlike a probability
+# emitted by an LLM, these values have an observable operational meaning.
+CERTAINTY_DETERMINISTIC = "deterministic"
+CERTAINTY_CONTEXTUAL = "contextual"
+CERTAINTY_LLM_ASSISTED = "llm_assisted"
+CERTAINTY_CLARIFICATION_REQUIRED = "clarification_required"
+
+CONTEXTUAL_SOURCES = {
+    "state",
+    "modality_gate",
+    "modality_keyword",
+    "modality_override",
+    "image_context_default",
+    "image_context_clarify",
+}
+
+# Only these slots are allowed to block execution. Product attributes such as
+# color, budget and size are optional filters, so the bot must not interrogate
+# the customer for every field before performing a useful search.
+BLOCKING_SLOTS = {"user_goal", "previous_search", "image_context", "image_goal"}
+
 
 @dataclass
 class IntentDecision:
@@ -133,7 +154,10 @@ class IntentDecision:
     modality: str = MODALITY_TEXT
     action: str = "search"
     route: str | None = None
+    # Deprecated compatibility field. Routing must use `certainty`, never this
+    # numeric value. It remains temporarily so older notebooks/UI do not break.
     confidence: float = 0.0
+    certainty: str = CERTAINTY_DETERMINISTIC
     rewrite_query: str = ""
     entities: dict = field(default_factory=dict)
     image_context: dict = field(default_factory=dict)
@@ -202,15 +226,28 @@ def plain_text(text: str) -> str:
     return normalize_text(strip_vietnamese_accents(text))
 
 
+def phrase_hit(text: str, phrase: str) -> bool:
+    """Match one normalized word/phrase without substring false positives."""
+    normalized_text = normalize_text(text)
+    normalized_phrase = normalize_text(phrase)
+    if not normalized_phrase:
+        return False
+    return bool(
+        re.search(
+            rf"(?<!\w){re.escape(normalized_phrase)}(?!\w)",
+            normalized_text,
+        )
+    )
+
+
 def keyword_hit(query: str, keywords: list[str] | tuple[str, ...]) -> bool:
+    """Match accented or accent-free keywords at word/phrase boundaries."""
     query_normalized = normalize_text(query)
     query_plain = plain_text(query)
     for keyword in keywords:
         keyword_normalized = normalize_text(keyword)
         keyword_plain = plain_text(keyword)
-        if keyword_normalized and (
-            keyword_normalized in query_normalized or keyword_plain in query_plain
-        ):
+        if phrase_hit(query_normalized, keyword_normalized) or phrase_hit(query_plain, keyword_plain):
             return True
     return False
 
@@ -228,6 +265,26 @@ CATEGORY_KEYWORDS = [
     "quan jean", "quan dai", "quan short", "quan", "chan vay", "vay",
     "dam", "jumpsuit", "giay", "dep", "tui xach", "phu kien",
 ]
+CATEGORY_ACCENTED_FORMS = {
+    "ao thun": ["áo thun"],
+    "ao so mi": ["áo sơ mi"],
+    "so mi": ["sơ mi"],
+    "ao khoac": ["áo khoác"],
+    "ao len": ["áo len"],
+    "ao": ["áo"],
+    "quan jean": ["quần jean"],
+    "quan dai": ["quần dài"],
+    "quan short": ["quần short"],
+    "quan": ["quần"],
+    "chan vay": ["chân váy"],
+    "vay": ["váy"],
+    "dam": ["đầm"],
+    "jumpsuit": ["jumpsuit"],
+    "giay": ["giày"],
+    "dep": ["dép"],
+    "tui xach": ["túi xách"],
+    "phu kien": ["phụ kiện"],
+}
 OCCASION_KEYWORDS = [
     "di lam", "di hoc", "di tiec", "di choi", "di bien", "hen ho",
     "du lich", "cong so", "hang ngay", "du dam cuoi", "troi lanh",
@@ -291,16 +348,28 @@ def extract_color_entities(query: str) -> list[str]:
     return colors
 
 
+def category_hit(query: str, category: str) -> bool:
+    """Match a category while preserving Vietnamese accent disambiguation.
+
+    For example, `đầm` is a product category while `đảm bảo` is not. We match
+    either the literal accent-free phrase typed by the user or an approved
+    accented spelling, instead of stripping every accent before comparison.
+    """
+    query_normalized = normalize_text(query)
+    forms = [category, *CATEGORY_ACCENTED_FORMS.get(category, [])]
+    return any(phrase_hit(query_normalized, form) for form in forms)
+
+
 def extract_basic_entities(query: str) -> dict:
     query_plain = plain_text(query)
     entities: dict = {}
     colors = extract_color_entities(query)
     if colors:
         entities["colors"] = colors
-    categories = [category for category in CATEGORY_KEYWORDS if category in query_plain]
+    categories = [category for category in CATEGORY_KEYWORDS if category_hit(query, category)]
     if categories:
         entities["categories"] = sorted(categories, key=len, reverse=True)
-    occasions = [occasion for occasion in OCCASION_KEYWORDS if occasion in query_plain]
+    occasions = [occasion for occasion in OCCASION_KEYWORDS if phrase_hit(query_plain, occasion)]
     if occasions:
         entities["occasions"] = occasions
     sizes = re.findall(
@@ -326,44 +395,37 @@ def extract_profile_entities(query: str) -> dict:
     updates: dict = {}
     delete_fields: list[str] = []
 
-    if any(phrase in query_plain for phrase in ["tu van do nam", "toi la nam", "gioi tinh nam"]):
+    if keyword_hit(query_plain, ["tu van do nam", "toi la nam", "gioi tinh nam"]):
         updates["gender"] = "male"
-    if any(phrase in query_plain for phrase in ["tu van do nu", "toi la nu", "gioi tinh nu"]):
+    if keyword_hit(query_plain, ["tu van do nu", "toi la nu", "gioi tinh nu"]):
         updates["gender"] = "female"
 
-    negative_profile_value = any(
-        phrase in query_plain
-        for phrase in ["khong phai", "khong co", "khong dung la"]
+    negative_profile_value = keyword_hit(
+        query_plain, ["khong phai", "khong co", "khong dung la"]
     )
 
     for label in LAYER_B_DANG_NGUOI:
-        if plain_text(label) in query_plain and not negative_profile_value:
+        if phrase_hit(query_plain, plain_text(label)) and not negative_profile_value:
             updates["dang_nguoi"] = label
             break
     for label in LAYER_B_TONE_DA:
-        if plain_text(label) in query_plain and not negative_profile_value:
+        if phrase_hit(query_plain, plain_text(label)) and not negative_profile_value:
             updates["tone_da"] = label
             break
 
-    has_delete_verb = negative_profile_value or any(
-        keyword in query_plain for keyword in PROFILE_DELETE_KEYWORDS
-    )
+    has_delete_verb = negative_profile_value or keyword_hit(query_plain, PROFILE_DELETE_KEYWORDS)
     if has_delete_verb:
         mentioned_body_label = any(
-            plain_text(label) in query_plain for label in LAYER_B_DANG_NGUOI
+            phrase_hit(query_plain, plain_text(label)) for label in LAYER_B_DANG_NGUOI
         )
         mentioned_tone_label = any(
-            plain_text(label) in query_plain for label in LAYER_B_TONE_DA
+            phrase_hit(query_plain, plain_text(label)) for label in LAYER_B_TONE_DA
         )
-        if mentioned_body_label or any(
-            keyword in query_plain for keyword in ["dang nguoi", "voc dang", "body type"]
-        ):
+        if mentioned_body_label or keyword_hit(query_plain, ["dang nguoi", "voc dang", "body type"]):
             delete_fields.append("dang_nguoi")
-        if mentioned_tone_label or any(
-            keyword in query_plain for keyword in ["tone da", "mau da", "skin tone"]
-        ):
+        if mentioned_tone_label or keyword_hit(query_plain, ["tone da", "mau da", "skin tone"]):
             delete_fields.append("tone_da")
-        if "gioi tinh" in query_plain:
+        if phrase_hit(query_plain, "gioi tinh"):
             delete_fields.append("gender")
 
     if delete_fields:
@@ -379,25 +441,61 @@ def strict_out_of_scope_hit(query: str) -> bool:
 
 
 def is_more_request(query: str) -> bool:
-    query_plain = plain_text(query)
-    return any(plain_text(keyword) in query_plain for keyword in FOLLOWUP_MORE_KEYWORDS)
+    return keyword_hit(query, FOLLOWUP_MORE_KEYWORDS)
 
 
 def infer_product_action(query: str) -> str:
     query_plain = plain_text(query)
     if is_more_request(query):
         return "more"
-    if "size" in query_plain or "kich co" in query_plain or re.search(
+    if keyword_hit(query_plain, ["size", "kich co"]) or re.search(
         r"\b(xs|s|m|l|xl|xxl|xxxl)\b", query_plain
     ):
         return "size_check"
-    if any(keyword in query_plain for keyword in ["gia", "bao nhieu", "duoi", "tren", "re hon", "dat hon"]):
+    if keyword_hit(query_plain, ["gia", "bao nhieu", "duoi", "tren", "re hon", "dat hon"]):
         return "price_check"
-    if any(keyword in query_plain for keyword in ["con hang", "het hang", "ton kho"]):
+    if keyword_hit(query_plain, ["con hang", "het hang", "ton kho"]):
         return "stock_check"
-    if any(keyword in query_plain for keyword in ["so sanh", "khac nhau", "nen chon"]):
+    if keyword_hit(query_plain, ["so sanh", "khac nhau", "nen chon"]):
         return "compare"
     return "search"
+
+
+def certainty_from_source(source: str, *, clarification: bool = False) -> str:
+    """Return an auditable certainty level from the decision mechanism."""
+    if clarification:
+        return CERTAINTY_CLARIFICATION_REQUIRED
+    if source in {"llm", "fallback"}:
+        return CERTAINTY_LLM_ASSISTED
+    if source in CONTEXTUAL_SOURCES:
+        return CERTAINTY_CONTEXTUAL
+    return CERTAINTY_DETERMINISTIC
+
+
+def derive_missing_slots(
+    intent: str,
+    action: str,
+    modality: str,
+    *,
+    state: dict | None = None,
+    image_context: dict | None = None,
+) -> list[str]:
+    """Derive blocking information gaps using Python policy, not LLM opinion.
+
+    Optional shopping filters (category, budget, color and size) never block a
+    request. The system asks only when it cannot choose a safe workflow.
+    """
+    state = state or {}
+    if intent == INTENT_UNKNOWN:
+        return ["user_goal"]
+    if action in {"more", "refine_outfit"}:
+        previous = state.get("last_route_decision")
+        if not previous or getattr(previous, "route", None) not in CONTINUABLE_ROUTES:
+            return ["previous_search"]
+    if modality in {MODALITY_IMAGE, MODALITY_TEXT_IMAGE} and action == "inspect_image":
+        if not image_context:
+            return ["image_context"]
+    return []
 
 
 def resolve_route(intent: str, modality: str, action: str) -> str | None:
@@ -446,6 +544,7 @@ def _decision(
         action=action,
         route=route,
         confidence=max(0.0, min(1.0, float(confidence))),
+        certainty=certainty_from_source(source),
         rewrite_query=query.strip(),
         entities=entities or {},
         image_context=image_context or {},
@@ -470,6 +569,10 @@ def _clarification(
     image_context: dict | None = None,
     trace: list[dict] | None = None,
 ) -> IntentDecision:
+    missing_slots = [
+        slot for slot in dict.fromkeys(missing_slots)
+        if slot in BLOCKING_SLOTS
+    ] or ["user_goal"]
     stages = list(trace or [])
     stages.append(_trace("route", "clarification", ", ".join(missing_slots)))
     return IntentDecision(
@@ -478,6 +581,7 @@ def _clarification(
         action="clarify",
         route=None,
         confidence=0.0,
+        certainty=CERTAINTY_CLARIFICATION_REQUIRED,
         rewrite_query=query.strip(),
         image_context=image_context or {},
         missing_slots=missing_slots,
@@ -505,7 +609,7 @@ def _route_image_request(query: str, image_context: dict | None = None) -> Inten
 
     profile_hit = keyword_hit(query, IMAGE_PROFILE_KEYWORDS)
     outfit_hit = keyword_hit(query, IMAGE_OUTFIT_KEYWORDS) or keyword_hit(query, DEFINITE_OUTFIT)
-    product_hit = keyword_hit(query, DEFINITE_SEARCH) or keyword_hit(query, CATEGORY_KEYWORDS)
+    product_hit = keyword_hit(query, DEFINITE_SEARCH) or bool(extract_basic_entities(query).get("categories"))
 
     if profile_hit and outfit_hit:
         return _decision(
@@ -567,6 +671,7 @@ def _route_image_request(query: str, image_context: dict | None = None) -> Inten
             action="inspect_image",
             route=None,
             confidence=0.0,
+            certainty=CERTAINTY_CONTEXTUAL,
             rewrite_query=query.strip(),
             missing_slots=["image_context"],
             reason="Cần hiểu nội dung ảnh trước khi chọn hoặc hỏi lại pipeline.",
@@ -643,7 +748,7 @@ def _route_pending_state(query: str, state: dict) -> IntentDecision | None:
     pending_profile = state.get("pending_profile_candidate")
     if pending_profile:
         trace = [_trace("state", "pending_profile_candidate", "awaiting confirmation")]
-        if any(keyword in query_plain for keyword in PROFILE_CONFIRM_KEYWORDS):
+        if keyword_hit(query_plain, PROFILE_CONFIRM_KEYWORDS):
             return _decision(
                 INTENT_PROFILE_MANAGEMENT,
                 MODALITY_TEXT,
@@ -655,7 +760,7 @@ def _route_pending_state(query: str, state: dict) -> IntentDecision | None:
                 entities={"profile_candidate": dict(pending_profile)},
                 trace=trace,
             )
-        if any(keyword in query_plain for keyword in PROFILE_REJECT_KEYWORDS):
+        if keyword_hit(query_plain, PROFILE_REJECT_KEYWORDS):
             return _decision(
                 INTENT_PROFILE_MANAGEMENT,
                 MODALITY_TEXT,
@@ -683,7 +788,7 @@ def _route_pending_state(query: str, state: dict) -> IntentDecision | None:
                 image_context=dict(state.get("pending_image_context") or {}),
                 trace=trace,
             )
-        if any(keyword in query_plain for keyword in CANCEL_PENDING_IMAGE_KEYWORDS):
+        if keyword_hit(query_plain, CANCEL_PENDING_IMAGE_KEYWORDS):
             return _decision(
                 INTENT_SOCIAL,
                 MODALITY_TEXT,
@@ -701,7 +806,7 @@ def _route_pending_state(query: str, state: dict) -> IntentDecision | None:
 def _route_profile_management(query: str) -> IntentDecision | None:
     query_plain = plain_text(query)
     trace = [_trace("keyword", "profile_management", query)]
-    if any(keyword in query_plain for keyword in PROFILE_CLEAR_ALL_KEYWORDS):
+    if keyword_hit(query_plain, PROFILE_CLEAR_ALL_KEYWORDS):
         return _decision(
             INTENT_PROFILE_MANAGEMENT,
             MODALITY_TEXT,
@@ -855,7 +960,7 @@ def route_from_keywords(
             entities=extract_basic_entities(query),
             trace=[_trace("keyword", action, query)],
         )
-    if keyword_hit(query, CATEGORY_KEYWORDS):
+    if extract_basic_entities(query).get("categories"):
         action = infer_product_action(query)
         return _decision(
             INTENT_PRODUCT_DISCOVERY,
@@ -885,11 +990,13 @@ ROUTE_CLASSIFY_PROMPT = (
     "Weather plus 'what to wear' is outfit_advice, not out_of_scope.\n\n"
     "Previous context: {context_block}\n"
     "User query: {query}\n\n"
+    "Do not report a confidence score and do not decide which fields are required.\n"
+    "If the main goal is ambiguous, return intent=unknown and action=clarify.\n\n"
     "Schema:\n"
     "{{\"intent\":\"product_discovery|outfit_advice|profile_management|social|out_of_scope|unknown\","
     "\"action\":\"search|more|price_check|size_check|stock_check|compare|create_outfit|refine_outfit|read|update|delete_field|clear_all|greeting|thanks|goodbye|redirect|clarify\","
-    "\"confidence\":0.0,\"rewrite_query\":\"retrieval-ready Vietnamese query\","
-    "\"entities\":{{}},\"missing_slots\":[],\"reason\":\"short operational reason\"}}"
+    "\"rewrite_query\":\"retrieval-ready Vietnamese query\","
+    "\"entities\":{{}},\"reason\":\"short operational reason\"}}"
 )
 
 ollama_client = ollama.Client(host=OLLAMA_BASE_URL)
@@ -917,28 +1024,38 @@ def coerce_intent_decision(
     *,
     modality: str = MODALITY_TEXT,
     source: str = "llm",
+    state: dict | None = None,
+    image_context: dict | None = None,
 ) -> IntentDecision:
     intent = str(data.get("intent", INTENT_UNKNOWN)).strip().lower()
     if intent not in BUSINESS_INTENTS | {INTENT_UNKNOWN}:
         intent = INTENT_UNKNOWN
     action = str(data.get("action") or "search").strip().lower()
     rewrite_query = str(data.get("rewrite_query") or query).strip() or query
-    try:
-        confidence = max(0.0, min(1.0, float(data.get("confidence", 0.70))))
-    except Exception:
-        confidence = 0.70
+    # Never use a confidence value self-reported by the model for routing.
+    # Keep it only as an observable debug hint when an older model returns it.
+    llm_reported_confidence = data.get("confidence")
     entities = data.get("entities") if isinstance(data.get("entities"), dict) else {}
     if not entities:
         entities = extract_basic_entities(rewrite_query)
-    missing_slots = data.get("missing_slots") if isinstance(data.get("missing_slots"), list) else []
     reason = str(data.get("reason", "LLM intent classification."))
-    trace = [_trace("llm_intent", intent, f"confidence={confidence:.2f}; action={action}")]
+    trace_detail = f"action={action}"
+    if llm_reported_confidence is not None:
+        trace_detail += "; ignored_model_confidence=true"
+    trace = [_trace("llm_intent", intent, trace_detail)]
 
-    if intent == INTENT_UNKNOWN or missing_slots:
+    missing_slots = derive_missing_slots(
+        intent,
+        action,
+        modality,
+        state=state,
+        image_context=image_context,
+    )
+    if missing_slots:
         return _clarification(
             query,
             modality=modality,
-            missing_slots=[str(slot) for slot in missing_slots] or ["user_goal"],
+            missing_slots=missing_slots,
             question="Bạn muốn tìm một sản phẩm cụ thể hay muốn mình gợi ý cách phối đồ?",
             options=[
                 {"label": "Tìm sản phẩm", "action": "search"},
@@ -970,7 +1087,8 @@ def coerce_intent_decision(
         modality,
         action,
         rewrite_query,
-        confidence=confidence,
+        # Compatibility only; certainty="llm_assisted" is the routing signal.
+        confidence=0.0,
         source=source,
         reason=reason,
         entities=entities,
@@ -987,7 +1105,11 @@ def coerce_route_decision(
     return coerce_intent_decision(data, query, source=source)
 
 
-def classify_intent_llm(query: str, last_bot_msg: str = "") -> IntentDecision:
+def classify_intent_llm(
+    query: str,
+    last_bot_msg: str = "",
+    state: dict | None = None,
+) -> IntentDecision:
     context_block = last_bot_msg[:300] if last_bot_msg else "none"
     try:
         response = ollama_client.chat(
@@ -1005,7 +1127,7 @@ def classify_intent_llm(query: str, last_bot_msg: str = "") -> IntentDecision:
         raw = response["message"]["content"].strip()
         parsed = extract_json_object(raw)
         if parsed:
-            return coerce_intent_decision(parsed, query, source="llm")
+            return coerce_intent_decision(parsed, query, source="llm", state=state)
     except Exception as exc:
         print(f"[WARN] LLM intent classify error: {exc}")
 
@@ -1060,7 +1182,7 @@ def route_user_request(
     )
     if fast_decision:
         return fast_decision
-    return classify_intent_llm(query, last_bot_msg=last_bot_msg)
+    return classify_intent_llm(query, last_bot_msg=last_bot_msg, state=state)
 
 
 def detect_intent_llm(query: str, last_bot_msg: str = "") -> str:
@@ -1076,7 +1198,7 @@ def detect_gender(query: str) -> str:
     female_keywords = ["nu", "con gai", "ban gai", "phu nu", "vo"]
     if keyword_hit(query, MALE_KEYWORDS):
         return "male"
-    if any(keyword in query_plain for keyword in female_keywords):
+    if keyword_hit(query_plain, female_keywords):
         return "female"
     return "unknown"
 
