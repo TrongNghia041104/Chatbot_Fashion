@@ -1065,21 +1065,26 @@ def _image_description(image_context: dict) -> str:
 def _route_image_request(query: str, image_context: dict | None = None) -> IntentDecision:
     """Route a request that includes an image through a multi-stage decision tree.
 
-    Xử lý yêu cầu có kèm ảnh. Đây là nánh phức tạp nhất của router vì
+    Xử lý yêu cầu có kèm ảnh. Đây là nhánh phức tạp nhất của router vì
     ảnh có thể đi kèm nhiều mục đích khác nhau.
 
     **Cây quyết định (Decision Tree) theo thứ tự ưu tiên**::
 
-        1. profile + outfit keyword  → analyze_then_style (multi-step workflow)
-        2. profile keyword            → profile_analysis (analyze_body / skin_tone)
-        3. outfit keyword             → outfit_advice (style_image_item)
-        4. identify keyword            → product_discovery (identify_image_item)
+        1. profile + outfit keyword  → analyze_then_style (multi-step workflow):
+                                       [ROUTE_PROFILE_VLM_ANALYSIS → ROUTE_TEXT_OUTFIT_ADVICE]
+        2. profile keyword           → profile_analysis (analyze_full_profile / analyze_skin_tone)
+        3. outfit keyword            → outfit_advice (style_image_item)
+        4. identify keyword          → product_discovery (identify_image_item)
+                                       - Nếu VLM chưa chạy → action=identify_image_item, route=None
+                                         (API chạy VLM rồi route lại)
+                                       - Nếu VLM đã chạy   → dùng caption làm search_query
+                                         → ROUTE_IMAGE_PRODUCT_SEARCH + entities {identified_item}
         5. product keyword / category → product_discovery (find_similar)
         6. image_context is None      → action=inspect_image (API must run VLM first)
-        7. VLM confidence >= threshold→ product_discovery (find_similar) + follow-up
-        8. VLM confidence < threshold → clarification (hỏi người dùng muốn gì)
+        7. VLM confidence >= threshold → product_discovery (find_similar) + follow-up question
+        8. VLM confidence < threshold  → clarification (hỏi người dùng muốn gì)
 
-    Trong trường hợp 5 (``image_context is None``), hàm trả về một decision
+    Trong trường hợp 6 (``image_context is None``), hàm trả về một decision
     đặc biệt với ``action="inspect_image"`` và ``missing_slots=["image_context"]``.
     API cần gọi VLM rồi route lại thêm một lần với ``image_context`` đã có.
 

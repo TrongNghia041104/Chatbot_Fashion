@@ -1,4 +1,4 @@
-﻿# SYSTEM_ARCHITECTURE.md — Kiến trúc tổng thể Chatbot Fashion
+# SYSTEM_ARCHITECTURE.md — Kiến trúc tổng thể Chatbot Fashion
 
 > **Mục tiêu**: Tổng quan kiến trúc toàn hệ thống — setup, luồng xử lý, vai trò từng module,
 > cách các thành phần kết nối với nhau, và các quyết định thiết kế quan trọng.
@@ -303,22 +303,29 @@ sequenceDiagram
     API->>Router: route_user_request(has_image=True)
 
     Router->>Router: _route_image_request()
-    note over Router: Kiểm tra keyword trong query trước
+    note over Router: Kiểm tra keyword trong query trước (8 nhánh)
 
-    alt Có keyword rõ ràng
-        Router-->>API: decision (route đã xác định)
-    else Không có keyword → cần hiểu ảnh
+    alt Có keyword rõ ràng (profile / outfit / product)
+        Router-->>API: decision (route đã xác định ngay)
+    else Có "identify keyword" (đây là gì?, món này là gì?)
+        Router-->>API: action="identify_image_item", route=None [cần VLM]
+        API->>VLM: analyze_image(image_bytes)
+        VLM-->>API: image_context {caption, fashion_item, confidence, ...}
+        API->>Router: route_user_request(image_context=image_context) [lần 2]
+        Router->>Router: Dùng caption làm search_query
+        Router-->>API: decision {route=image_product_search, entities.identified_item, follow_up}
+    else Không có keyword → cần hiểu ảnh trước
         Router-->>API: action="inspect_image", route=None
         API->>VLM: analyze_image(image_bytes)
         VLM-->>API: image_context {subject, fashion_item, confidence, ...}
         API->>Router: route_user_request(image_context=image_context) [lần 2]
         Router->>Router: _route_image_request(image_context đã có)
-        Router-->>API: decision (route cuối cùng)
+        Router-->>API: decision (route cuối cùng, dựa vào confidence)
     end
 
     API->>Qdrant: search với image vector hoặc text vector
     Qdrant-->>API: product candidates
-    API-->>User: response
+    API-->>User: response {products, advice, follow_up_options}
 ```
 
 ---

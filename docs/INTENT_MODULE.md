@@ -1,4 +1,4 @@
-﻿# INTENT_MODULE.md — Deep Dive: `app/core/intent.py`
+# INTENT_MODULE.md — Deep Dive: `app/core/intent.py`
 
 > **Mục tiêu**: Giúp developer (mới hoặc cũ) hiểu rõ module `intent.py` hoạt động ra sao,
 > tại sao mỗi quyết định thiết kế lại được thực hiện như vậy, và cách mở rộng không phá vỡ hệ thống hiện tại.
@@ -53,7 +53,7 @@ MODALITY = "Họ cung cấp kiểu đầu vào nào?"
            (text / image / text_image)
 
 ACTION   = "Thao tác cụ thể nào bên trong intent?"
-           (search / find_similar / create_outfit / style_image_item / update / read / ...)
+           (search / find_similar / identify_image_item / create_outfit / style_image_item / update / read / ...)
 
 ROUTE    = "Pipeline kỹ thuật nào sẽ chạy?"
            (text_product_search / image_product_search / text_outfit_advice / ...)
@@ -279,18 +279,26 @@ colors, categories, occasions, sizes, budget_text
 
 Cây quyết định khi có ảnh (theo thứ tự ưu tiên):
 ```
-1. profile keyword          → INTENT_PROFILE_ANALYSIS
-2. outfit keyword           → INTENT_OUTFIT_ADVICE
-3. product keyword/category → INTENT_PRODUCT_DISCOVERY (find_similar)
-4. image_context is None    → action=inspect_image [API phải gọi VLM trước]
-5. VLM confidence >= threshold → product_discovery + follow-up question
-6. VLM confidence < threshold  → clarification (hỏi user muốn gì)
+1. profile + outfit keyword  → analyze_then_style (workflow 2 bước: VLM phân tích → gợi ý outfit)
+2. profile keyword           → INTENT_PROFILE_ANALYSIS (analyze_body / analyze_full_profile)
+3. outfit keyword            → INTENT_OUTFIT_ADVICE (style_image_item)
+4. identify keyword          → INTENT_PRODUCT_DISCOVERY (identify_image_item)
+                               VLM chưa chạy → inspect_image trước
+                               VLM đã chạy   → dùng caption để build search_query
+5. product keyword/category  → INTENT_PRODUCT_DISCOVERY (find_similar)
+6. image_context is None     → action=inspect_image [API phải gọi VLM trước]
+7. VLM confidence >= threshold → product_discovery (find_similar) + follow-up question
+8. VLM confidence < threshold  → clarification (hỏi user muốn gì)
 ```
 
 > [!NOTE]
-> **Trường hợp 4** là đặc biệt: hàm trả về `action="inspect_image"` với `route=None`.
+> **Trường hợp 6** là đặc biệt: hàm trả về `action="inspect_image"` với `route=None`.
 > `api.py` phải gọi VLM, lấy kết quả, rồi gọi lại router với `image_context` đã có.
 > Đây là **2-pass routing** cho image request.
+>
+> **Trường hợp 4 (identify)** cũng dùng 2-pass nếu VLM chưa chạy, nhưng sau khi có
+> `image_context`, router dùng `caption` làm `search_query` và route vào `image_product_search`.
+> Entities được bổ sung thêm `identified_item` và `image_caption` để UI hiển thị kết quả nhận diện.
 
 ### Layer 2: Session State — `_route_pending_state()`
 
@@ -372,10 +380,12 @@ IntentDecision
 |--------|------------------|-------|---------|
 | `product_discovery` | `image` hoặc `text_image` | `image_product_search` | CLIP vector search bằng ảnh |
 | `product_discovery` | `action=find_similar` | `image_product_search` | Tìm sản phẩm tương tự ảnh |
+| `product_discovery` | `action=identify_image_item` | `image_product_search` | VLM nhận diện món đồ → search catalog |
 | `product_discovery` | `text` | `text_product_search` | Text vector search |
 | `outfit_advice` | `image/text_image` + `style_image_item` | `image_outfit_advice` | Phối đồ từ item trong ảnh |
 | `outfit_advice` | `text` | `text_outfit_advice` | LLM gợi ý outfit từ text |
-| `profile_analysis` | bất kỳ | `profile_vlm_analysis` | VLM phân tích người trong ảnh |
+| `profile_analysis` | `analyze_then_style` | `profile_vlm_analysis` → `text_outfit_advice` | Workflow 2 bước: phân tích + outfit |
+| `profile_analysis` | các action khác | `profile_vlm_analysis` | VLM phân tích người trong ảnh |
 | `profile_management` | bất kỳ | `profile_state_handler` | CRUD profile database |
 | `social` | bất kỳ | `social_response` | Template cố định |
 | `out_of_scope` | bất kỳ | `out_of_scope_redirect` | Thông báo + hướng dẫn |
@@ -385,7 +395,7 @@ IntentDecision
 | Certainty | Source | Ý nghĩa |
 |-----------|--------|---------|
 | `deterministic` | `keyword`, `keyword_heuristic` | Từ khóa chính xác cao |
-| `contextual` | `state`, `modality_gate`, `image_context_default` | Session hoặc VLM |
+| `contextual` | `state`, `modality_gate`, `image_context_default`, `image_context_identify` | Session, VLM default, hoặc VLM nhận diện trực tiếp |
 | `llm_assisted` | `llm` | LLM phân loại |
 | `clarification_required` | bất kỳ | Chưa thể chọn pipeline an toàn |
 
