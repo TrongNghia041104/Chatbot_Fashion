@@ -168,6 +168,29 @@ def _retrieval_progress_message(entities: dict) -> str:
     return f"Mình đang tìm trong cửa hàng theo: {' · '.join(parts)}..."
 
 
+def _image_identification_reply(image_context: dict) -> str:
+    """Turn a VLM observation into a cautious, user-facing identification."""
+    fashion_item = str(image_context.get("fashion_item") or "").strip()
+    caption = str(image_context.get("caption") or "").strip()
+    if fashion_item:
+        sentences = [f"Mình nhận ra đây có vẻ là **{fashion_item}**."]
+        if caption and fashion_item.casefold() not in caption.casefold():
+            sentences.append(f"{caption.rstrip('.')}.")
+        sentences.append(
+            "Mình đã đặt những mẫu gần giống tìm được trong cửa hàng ở bên cạnh để bạn đối chiếu."
+        )
+        return " ".join(sentences)
+    if caption:
+        return (
+            f"Qua ảnh, mình nhìn thấy **{caption.rstrip('.')}**. "
+            "Mình chưa xác định chắc tên món đồ, nhưng vẫn đặt các kết quả gần nhất ở bên cạnh để bạn tham khảo."
+        )
+    return (
+        "Mình chưa nhìn đủ rõ để gọi đúng tên món đồ trong ảnh. "
+        "Bạn thử gửi ảnh sáng hơn, chụp trọn món và ít vật thể phía sau nhé."
+    )
+
+
 def _stream_chain_via_queue(
     chain,
     input_dict: dict,
@@ -290,6 +313,7 @@ async def chat(
         image_search_docs = []
         allowed_product_ids: set[str] = set()
         temporary_profile = None
+        identification_reply = ""
 
         def done_payload(ttft: float = 0.0, **extra) -> dict:
             """Build one consistent completion event, including developer telemetry."""
@@ -349,7 +373,7 @@ async def chat(
                     tmp.write(await image.read())
                     tmp_path = tmp.name
 
-                if decision.action == "inspect_image":
+                if decision.action in {"inspect_image", "identify_image_item"} and not decision.image_context:
                     yield make_event(
                         {
                             "type": "progress",
@@ -381,6 +405,19 @@ async def chat(
                     if decision_used_llm(decision):
                         telemetry.add_call("llm_router")
                     final_query = decision.rewrite_query or message or ""
+
+                    if decision.action == "identify_image_item":
+                        identification_reply = _image_identification_reply(decision.image_context)
+                        yield make_event(
+                            _decision_event(
+                                decision,
+                                profile.get("gender", "unknown"),
+                                developer_mode,
+                            )
+                        )
+                        async for event in _stream_text(identification_reply):
+                            yield event
+                        response_tokens.append(identification_reply)
 
                 if decision.handler == "profile_analysis":
                     yield make_event(
@@ -474,6 +511,26 @@ async def chat(
                         )
                     if developer_mode:
                         yield make_event({"type": "stage_metrics", **telemetry.snapshot()})
+
+                    if decision.action == "identify_image_item":
+                        if decision.follow_up_question:
+                            yield make_event(
+                                {
+                                    "type": "suggested_follow_up",
+                                    "question": decision.follow_up_question,
+                                    "options": decision.follow_up_options,
+                                }
+                            )
+                        state["last_route_decision"] = decision
+                        state["last_query"] = final_query
+                        state["last_bot_msg"] = identification_reply
+                        yield make_event(
+                            done_payload(
+                                retrieved_count=len(image_search_docs),
+                                grounding_ok=True,
+                            )
+                        )
+                        return
             except Exception as exc:
                 yield make_event({"type": "error", "message": f"Lỗi xử lý ảnh: {exc}"})
                 return

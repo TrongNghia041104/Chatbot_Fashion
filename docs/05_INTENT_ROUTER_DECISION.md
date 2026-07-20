@@ -20,6 +20,19 @@ Ví dụ “phối đồ với chiếc áo trong ảnh”:
 }
 ```
 
+Ví dụ “Sản phẩm trong ảnh này là gì?” dùng cùng intent tìm sản phẩm, không dùng profile:
+
+```json
+{
+  "intent": "product_discovery",
+  "modality": "text_image",
+  "action": "identify_image_item",
+  "route": "image_product_search"
+}
+```
+
+`profile_analysis` chỉ dành cho dáng người/tone da. `identify_image_item` dùng VLM để mô tả món đồ và FashionCLIP để tìm catalog match, nhờ vậy không cần thêm intent hoặc route thứ chín.
+
 ## Trình tự router
 
 ```mermaid
@@ -111,4 +124,3 @@ Category, màu, size, budget, brand và occasion là optional filter. Thiếu ch
 4. Cập nhật LLM schema nếu cần.
 5. Thêm positive, negative, accented, unaccented và follow-up cases.
 6. Cập nhật tài liệu này và notebook 08.
-

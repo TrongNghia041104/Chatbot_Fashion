@@ -44,7 +44,7 @@ Hệ thống có một top-level router, sáu business intent và tám execution
 
 | Intent | Ý nghĩa |
 |---|---|
-| `product_discovery` | Tìm, xem, so sánh, hỏi giá/size/tồn kho |
+| `product_discovery` | Nhận diện món trong ảnh; tìm, xem, so sánh, hỏi giá/size/tồn kho |
 | `outfit_advice` | Tạo hoặc điều chỉnh outfit |
 | `profile_analysis` | Phân tích dáng người/tone da bằng ảnh |
 | `profile_management` | Đọc, cập nhật hoặc xóa profile |
@@ -81,4 +81,3 @@ Các câu chắc chắn đi qua luật Python nhanh. Chỉ câu mơ hồ mới g
 - Phân tích vóc dáng/tone da từ ảnh là gợi ý và cần người dùng xác nhận trước khi lưu.
 - Router được kiểm thử bằng tập case nội bộ, chưa phải mô hình xác suất đã calibration.
 - Grounding kiểm soát tốt trường thương mại và mã sản phẩm, nhưng diễn giải phong cách vẫn là nội dung sinh bởi LLM.
-

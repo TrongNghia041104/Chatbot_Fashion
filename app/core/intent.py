@@ -138,6 +138,7 @@ ROUTE_CLARIFY = "clarify"  # Nhãn kiểm soát — KHÔNG bao giờ được tr
 PRODUCT_ACTIONS = {
     "search",
     "find_similar",
+    "identify_image_item",
     "more",
     "price_check",
     "size_check",
@@ -181,6 +182,7 @@ CONTEXTUAL_SOURCES = {
     "modality_keyword",    # Keyword đi kèm ảnh ("phân tích dáng", "phối đồ"...)
     "modality_override",   # Caller ép buộc route image search (force_image_search=True)
     "image_context_default",  # VLM nhận ra fashion item → tìm sản phẩm tương tự
+    "image_context_identify",  # VLM mô tả trực tiếp món đồ người dùng hỏi
     "image_context_clarify",  # VLM không chắc → hỏi lại người dùng
 }
 
@@ -504,6 +506,13 @@ IMAGE_OUTFIT_KEYWORDS = [
 IMAGE_PROFILE_KEYWORDS = [
     "dang nguoi", "body type", "tone da", "mau da", "phan tich nguoi",
     "phan tich dang", "phan tich voc dang",
+]
+IMAGE_IDENTIFY_KEYWORDS = [
+    "day la gi", "nay la gi", "anh nay la gi", "san pham nay la gi",
+    "san pham nay cua toi la gi",
+    "san pham gi", "mon nay la gi", "mon gi", "do gi", "loai gi",
+    "nhan dien san pham", "nhan dien mon do", "cho biet day la gi",
+    "phan tich san pham", "mo ta san pham", "mo ta mon do",
 ]
 PROFILE_CONFIRM_KEYWORDS = [
     "dong y", "xac nhan", "luu lai", "luu thong tin", "dung roi", "chinh xac",
@@ -1064,10 +1073,11 @@ def _route_image_request(query: str, image_context: dict | None = None) -> Inten
         1. profile + outfit keyword  → analyze_then_style (multi-step workflow)
         2. profile keyword            → profile_analysis (analyze_body / skin_tone)
         3. outfit keyword             → outfit_advice (style_image_item)
-        4. product keyword / category → product_discovery (find_similar)
-        5. image_context is None      → action=inspect_image (API must run VLM first)
-        6. VLM confidence >= threshold→ product_discovery (find_similar) + follow-up
-        7. VLM confidence < threshold → clarification (hỏi người dùng muốn gì)
+        4. identify keyword            → product_discovery (identify_image_item)
+        5. product keyword / category → product_discovery (find_similar)
+        6. image_context is None      → action=inspect_image (API must run VLM first)
+        7. VLM confidence >= threshold→ product_discovery (find_similar) + follow-up
+        8. VLM confidence < threshold → clarification (hỏi người dùng muốn gì)
 
     Trong trường hợp 5 (``image_context is None``), hàm trả về một decision
     đặc biệt với ``action="inspect_image"`` và ``missing_slots=["image_context"]``.
@@ -1086,6 +1096,10 @@ def _route_image_request(query: str, image_context: dict | None = None) -> Inten
 
     profile_hit = keyword_hit(query, IMAGE_PROFILE_KEYWORDS)
     outfit_hit = keyword_hit(query, IMAGE_OUTFIT_KEYWORDS) or keyword_hit(query, DEFINITE_OUTFIT)
+    identify_hit = keyword_hit(query, IMAGE_IDENTIFY_KEYWORDS) or (
+        keyword_hit(query, ["san pham", "mon do", "mon nay", "do nay", "anh nay"])
+        and keyword_hit(query, ["la gi", "loai gi", "goi la gi"])
+    )
     product_hit = keyword_hit(query, DEFINITE_SEARCH) or bool(extract_basic_entities(query).get("categories"))
 
     if profile_hit and outfit_hit:
@@ -1125,6 +1139,52 @@ def _route_image_request(query: str, image_context: dict | None = None) -> Inten
             reason="Ảnh đi kèm yêu cầu phối món trong ảnh.",
             entities=entities,
             trace=trace + [_trace("keyword", "image_outfit", query)],
+        )
+    if identify_hit:
+        if image_context is None:
+            return _decision(
+                INTENT_PRODUCT_DISCOVERY,
+                modality,
+                "identify_image_item",
+                query,
+                confidence=0.0,
+                source="modality_keyword",
+                reason="Người dùng hỏi trực tiếp món đồ trong ảnh là gì; cần VLM mô tả trước.",
+                entities=entities,
+                trace=trace + [_trace("keyword", "identify_image_item", query)],
+            )
+
+        caption = _image_description(image_context)
+        fashion_item = str(image_context.get("fashion_item", "")).strip()
+        identified_entities = dict(entities)
+        if fashion_item:
+            identified_entities["identified_item"] = fashion_item
+        if caption:
+            identified_entities["image_caption"] = caption
+        search_query = f"Tìm sản phẩm giống {fashion_item or caption}"
+        return _decision(
+            INTENT_PRODUCT_DISCOVERY,
+            modality,
+            "identify_image_item",
+            search_query,
+            confidence=0.0,
+            source="image_context_identify",
+            reason="VLM đã mô tả món đồ; trả lời nhận diện và dùng image retrieval lấy catalog matches.",
+            entities=identified_entities,
+            image_context=image_context,
+            trace=trace + [_trace("image_understanding", "identify_image_item", caption)],
+            follow_up_question="Bạn muốn xem thêm mẫu tương tự hay phối đồ với món này?",
+            follow_up_options=[
+                {
+                    "label": "Xem các mẫu tương tự",
+                    "action": "view_similar_results",
+                },
+                {
+                    "label": "Phối đồ với món này",
+                    "value": "Phối đồ với món này",
+                    "action": "style_image_item",
+                },
+            ],
         )
     if product_hit:
         return _decision(
@@ -1554,7 +1614,7 @@ ROUTE_CLASSIFY_PROMPT = (
     "If the main goal is ambiguous, return intent=unknown and action=clarify.\n\n"
     "Schema:\n"
     "{{\"intent\":\"product_discovery|outfit_advice|profile_management|social|out_of_scope|unknown\","
-    "\"action\":\"search|more|price_check|size_check|stock_check|compare|create_outfit|refine_outfit|read|update|delete_field|clear_all|greeting|thanks|goodbye|redirect|clarify\","
+    "\"action\":\"search|find_similar|identify_image_item|more|price_check|size_check|stock_check|compare|create_outfit|refine_outfit|read|update|delete_field|clear_all|greeting|thanks|goodbye|redirect|clarify\","
     "\"rewrite_query\":\"retrieval-ready Vietnamese query\","
     "\"entities\":{{}},\"reason\":\"short operational reason\"}}"
 )

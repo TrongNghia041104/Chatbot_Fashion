@@ -51,6 +51,8 @@ Nếu người dùng ghi rõ “tìm giống ảnh”, router đi thẳng `image
 4. FashionCLIP local encode ảnh.
 5. Qdrant image collection trả catalog matches.
 
+Nếu người dùng hỏi trực tiếp “Sản phẩm này là gì?”, action `identify_image_item` chạy VLM trước để trả lời tên/đặc điểm nhìn thấy được, rồi dùng chính route `image_product_search` lấy catalog matches. Luồng này không gọi answer LLM: VLM observation tạo câu trả lời thận trọng, card cung cấp dữ liệu thương mại, sau đó UI đưa lựa chọn xem kết quả hoặc phối đồ.
+
 ## Text outfit
 
 1. Router chọn `text_outfit_advice`.
@@ -91,4 +93,3 @@ validation
 ```
 
 Không debug prompt LLM trước khi xác nhận retrieval đã đưa đúng sản phẩm.
-
