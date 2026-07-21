@@ -1,0 +1,80 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="IurkLKXTSVK1FEJEqe7w" name="Page-1">
+    <mxGraphModel dx="1381" dy="530" grid="0" gridSize="10" guides="0" tooltips="0" connect="0" arrows="0" fold="0" page="0" pageScale="1" pageWidth="830" pageHeight="350" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="BG_LB" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#9333EA;fontColor=#0F172A;fontSize=15;fontStyle=1;strokeWidth=2;verticalAlign=top;" value="🟣 Layer B – Tri thức phối đồ (Outfits)" vertex="1">
+          <mxGeometry height="310" width="429" x="-39" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="BG_LA" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#16A34A;fontColor=#0F172A;fontSize=15;fontStyle=1;strokeWidth=2;verticalAlign=top;" value="🟢 Layer A – Sản phẩm thực (Products)" vertex="1">
+          <mxGeometry height="310" width="431" x="420" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="Q" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2FE;strokeColor=#0284C7;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="👤 Truy vấn + hồ sơ người dùng" vertex="1">
+          <mxGeometry height="45" width="140" x="-1" y="68" as="geometry" />
+        </mxCell>
+        <mxCell id="BGE" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#9333EA;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="⚡ BGE-M3 encode text" vertex="1">
+          <mxGeometry height="45" width="140" x="218" y="68" as="geometry" />
+        </mxCell>
+        <mxCell id="ODB" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#FFEDD5;strokeColor=#EA580C;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1;verticalAlign=top;" value="🗄 Qdrant layer_b_*" vertex="1">
+          <mxGeometry height="50" width="140" x="218" y="143" as="geometry" />
+        </mxCell>
+        <mxCell id="PF" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🔍 Payload filter (gender · vóc dáng · da" vertex="1">
+          <mxGeometry height="50" width="171" x="-27" y="143" as="geometry" />
+        </mxCell>
+        <mxCell id="RULE" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE7F3;strokeColor=#DB2777;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="📌 1 luật outfit (phong cách · bối cảnh)" vertex="1">
+          <mxGeometry height="50" width="166" x="-25" y="232" as="geometry" />
+        </mxCell>
+        <mxCell id="SLOT" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0E7FF;strokeColor=#4F46E5;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="📐 ≤ 3 slot&amp;nbsp;&lt;div&gt;(danh mục cần phối)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="50" width="165" x="218" y="233" as="geometry" />
+        </mxCell>
+        <mxCell id="E_Q" edge="1" parent="1" source="Q" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="BGE" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_BGE" edge="1" parent="1" source="BGE" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="ODB" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_ODB" edge="1" parent="1" source="ODB" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="PF" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_PF" edge="1" parent="1" source="PF" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="RULE" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_RULE" edge="1" parent="1" source="RULE" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="SLOT" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="VFC" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#9333EA;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="⚡ ViFashionCLIP batch encode&amp;nbsp;" vertex="1">
+          <mxGeometry height="56" width="159" x="445" y="55" as="geometry" />
+        </mxCell>
+        <mxCell id="ADB" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#FFEDD5;strokeColor=#EA580C;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🗄 Qdrant fashion_products_*" vertex="1">
+          <mxGeometry height="50" width="140" x="676" y="58" as="geometry" />
+        </mxCell>
+        <mxCell id="FILT" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🔍 Category filter + score ≥ 0.30" vertex="1">
+          <mxGeometry height="50" width="140" x="676" y="148" as="geometry" />
+        </mxCell>
+        <mxCell id="OUT" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#16A34A;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🛍 SP chính + thay thế → Product cards + LLM" vertex="1">
+          <mxGeometry height="50" width="363" x="466" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="E_SLOT_VFC" edge="1" parent="1" source="SLOT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="VFC" value="">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="288" y="212" />
+              <mxPoint x="520" y="212" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="E_VFC" edge="1" parent="1" source="VFC" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="ADB" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_ADB" edge="1" parent="1" source="ADB" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="FILT" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_FILT" edge="1" parent="1" source="FILT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1;" target="OUT" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="651" y="223" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

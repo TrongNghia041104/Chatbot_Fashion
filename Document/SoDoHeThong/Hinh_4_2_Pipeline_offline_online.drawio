@@ -1,0 +1,79 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="hn_Ec2lQ-Gawa-C-C5B6" name="Page-1">
+    <mxGraphModel dx="981" dy="530" grid="0" gridSize="10" guides="0" tooltips="0" connect="0" arrows="0" fold="0" page="0" pageScale="1" pageWidth="840" pageHeight="420" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="BG_OFF" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#0284C7;fontColor=#0F172A;fontSize=15;fontStyle=1;strokeWidth=2;verticalAlign=top;" value="⚙ Offline – Lập chỉ mục ngoại tuyến" vertex="1">
+          <mxGeometry height="280" width="360" x="30" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="BG_ON" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#16A34A;fontColor=#0F172A;fontSize=15;fontStyle=1;strokeWidth=2;verticalAlign=top;" value="🟢 Online – Phục vụ trực tuyến" vertex="1">
+          <mxGeometry height="370" width="380" x="420" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="D1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#475569;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="📁 Dữ liệu thô Layer A · B" vertex="1">
+          <mxGeometry height="45" width="140" x="60" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="D2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2FE;strokeColor=#0284C7;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🔄 Chuẩn hóa &amp;amp; Preprocess" vertex="1">
+          <mxGeometry height="45" width="140" x="220" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="D3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#9333EA;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="⚡ Vector Embedding ViFCLIP / BGE-M3" vertex="1">
+          <mxGeometry height="48" width="180" x="140" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="QD" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#FFEDD5;strokeColor=#EA580C;fontColor=#0F172A;fontSize=15;strokeWidth=2;verticalAlign=top;fontStyle=1" value="🗄 Qdrant DB 4 collections" vertex="1">
+          <mxGeometry height="58" width="180" x="140" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="E_D1" edge="1" parent="1" source="D1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="D2" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_D2" edge="1" parent="1" source="D2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="D3" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_D3" edge="1" parent="1" source="D3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="QD" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="R1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2FE;strokeColor=#0284C7;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="👤 User request (text / ảnh)" vertex="1">
+          <mxGeometry height="45" width="140" x="450" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="R0" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🔍 Validate input" vertex="1">
+          <mxGeometry height="45" width="140" x="620" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="R2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE7F3;strokeColor=#DB2777;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🔀 Router&amp;nbsp;&lt;div&gt;(Intent &amp;amp; Modality)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="45" width="140" x="620" y="135" as="geometry" />
+        </mxCell>
+        <mxCell id="R3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#9333EA;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="⚡ Encode query vector" vertex="1">
+          <mxGeometry height="45" width="140" x="450" y="135" as="geometry" />
+        </mxCell>
+        <mxCell id="R4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CCFBF1;strokeColor=#0D9488;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🔎 Retrieve + Payload Filter" vertex="1">
+          <mxGeometry height="50" width="140" x="450" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="R5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#16A34A;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🛍 Product card&amp;nbsp;&lt;div&gt;(gửi qua SSE trước)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="50" width="140" x="620" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="R6" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#7E22CE;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🤖 LLM stream + FactFilter &amp;amp; Grounding" vertex="1">
+          <mxGeometry height="50" width="279" x="487" y="317" as="geometry" />
+        </mxCell>
+        <mxCell id="E_R1" edge="1" parent="1" source="R1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="R0" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_R0" edge="1" parent="1" source="R0" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="R2" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_R2" edge="1" parent="1" source="R2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="R3" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_R3" edge="1" parent="1" source="R3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="R4" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_R4" edge="1" parent="1" source="R4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="R5" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_R5" edge="1" parent="1" source="R5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="R6" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_QD_R4" edge="1" parent="1" source="QD" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#0284C7;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="R4" value="vector search">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxGraphModel dx="1" dy="1" grid="0" gridSize="10" guides="0" tooltips="0" connect="0" arrows="0" fold="0" page="0" pageScale="1" pageWidth="1000" pageHeight="270" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/><mxCell id="1" parent="0"/>
+    <mxCell id="IMG" value="📷 Ảnh người dùng" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2FE;strokeColor=#0284C7;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="30" y="40" width="130" height="45" as="geometry"/></mxCell>
+    <mxCell id="PRE" value="⚙ Tiền xử lý
+512px JPEG" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#475569;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="190" y="40" width="130" height="45" as="geometry"/></mxCell>
+    <mxCell id="VLM" value="👁 Qwen2.5-VL
+vóc dáng · tông da" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#9333EA;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="350" y="40" width="140" height="45" as="geometry"/></mxCell>
+    <mxCell id="NORM" value="🔄 Chuẩn hóa
+schema + nhãn" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE7F3;strokeColor=#DB2777;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="520" y="40" width="130" height="45" as="geometry"/></mxCell>
+    <mxCell id="CAND" value="📋 profile_candidate
+(gửi UI xác nhận)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="680" y="40" width="140" height="45" as="geometry"/></mxCell>
+    <mxCell id="CHK" value="❓ Người dùng
+xác nhận?" style="shape=rhombus;whiteSpace=wrap;html=1;fillColor=#FEF9C3;strokeColor=#CA8A04;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="680" y="120" width="140" height="50" as="geometry"/></mxCell>
+    <mxCell id="UPD" value="✅ Cập nhật profile" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D1FAE5;strokeColor=#059669;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="520" y="120" width="130" height="45" as="geometry"/></mxCell>
+    <mxCell id="DROP" value="❌ Hủy candidate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEE2E2;strokeColor=#DC2626;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="840" y="120" width="130" height="45" as="geometry"/></mxCell>
+    <mxCell id="DEL" value="🗑 Xóa ảnh tạm + log" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E2E8F0;strokeColor=#64748B;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="680" y="200" width="140" height="42" as="geometry"/></mxCell>
+    <mxCell id="E1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="IMG" target="PRE" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="PRE" target="VLM" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="VLM" target="NORM" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="NORM" target="CAND" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="CAND" target="CHK" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E6" value="Có" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="CHK" target="UPD" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E7" value="Không" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="CHK" target="DROP" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="UPD" target="DEL" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="DROP" target="DEL" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+  </root>
+</mxGraphModel>

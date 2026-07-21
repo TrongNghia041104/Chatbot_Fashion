@@ -1,0 +1,64 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="OjDM8DQYiqOsPusgP9HE" name="Page-1">
+    <mxGraphModel dx="1154" dy="624" grid="0" gridSize="10" guides="0" tooltips="0" connect="0" arrows="0" fold="0" page="0" pageScale="1" pageWidth="1000" pageHeight="270" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="IMG" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2FE;strokeColor=#0284C7;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="📷 Ảnh người dùng" vertex="1">
+          <mxGeometry height="45" width="130" x="30" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="PRE" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#475569;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="⚙ Tiền xử lý 512px JPEG" vertex="1">
+          <mxGeometry height="45" width="130" x="190" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="VLM" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#9333EA;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="👁 Qwen2.5-VL vóc dáng &amp;amp; tông da" vertex="1">
+          <mxGeometry height="45" width="140" x="350" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="NORM" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE7F3;strokeColor=#DB2777;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🔄 Chuẩn hóa schema + nhãn" vertex="1">
+          <mxGeometry height="45" width="130" x="520" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="CAND" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="📋 profile_candidate (gửi UI xác nhận)" vertex="1">
+          <mxGeometry height="55" width="140" x="680" y="37" as="geometry" />
+        </mxCell>
+        <mxCell id="CHK" parent="1" style="shape=rhombus;whiteSpace=wrap;html=1;fillColor=#FEF9C3;strokeColor=#CA8A04;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="❓ Người dùng xác nhận?" vertex="1">
+          <mxGeometry height="50" width="140" x="680" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="UPD" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D1FAE5;strokeColor=#059669;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="✅ Cập nhật profile" vertex="1">
+          <mxGeometry height="45" width="130" x="400" y="164" as="geometry" />
+        </mxCell>
+        <mxCell id="DROP" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEE2E2;strokeColor=#DC2626;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="❌ Hủy candidate" vertex="1">
+          <mxGeometry height="45" width="130" x="998" y="158" as="geometry" />
+        </mxCell>
+        <mxCell id="DEL" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E2E8F0;strokeColor=#64748B;fontColor=#0F172A;fontSize=15;strokeWidth=2;fontStyle=1" value="🗑 Xóa ảnh tạm + log" vertex="1">
+          <mxGeometry height="42" width="140" x="680" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="E1" edge="1" parent="1" source="IMG" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="PRE" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E2" edge="1" parent="1" source="PRE" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="VLM" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E3" edge="1" parent="1" source="VLM" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="NORM" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E4" edge="1" parent="1" source="NORM" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="CAND" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E5" edge="1" parent="1" source="CAND" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="CHK" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E6" edge="1" parent="1" source="CHK" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="UPD" value="Có">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E7" edge="1" parent="1" source="CHK" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="DROP" value="Không">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E8" edge="1" parent="1" source="UPD" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="DEL" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E9" edge="1" parent="1" source="DROP" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=15;fontColor=#0F172A;fontStyle=1" target="DEL" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

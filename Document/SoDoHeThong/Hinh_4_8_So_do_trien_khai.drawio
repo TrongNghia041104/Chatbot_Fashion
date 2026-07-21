@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxGraphModel dx="1" dy="1" grid="0" gridSize="10" guides="0" tooltips="0" connect="0" arrows="0" fold="0" page="0" pageScale="1" pageWidth="680" pageHeight="330" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/><mxCell id="1" parent="0"/>
+    <mxCell id="BR" value="🌐 Browser
+(MUSE Web UI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2FE;strokeColor=#0284C7;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="30" y="100" width="130" height="55" as="geometry"/></mxCell>
+    <mxCell id="API" value="⚙ FastAPI Backend
+:8000" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#16A34A;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="200" y="100" width="140" height="55" as="geometry"/></mxCell>
+    <mxCell id="OLL" value="🤖 Ollama Service (:11434)
+Qwen3-4B · Qwen2.5-VL · BGE-M3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#9333EA;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="400" y="20" width="240" height="48" as="geometry"/></mxCell>
+    <mxCell id="VFC" value="⚡ ViFashionCLIP Service
+:18080" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#9333EA;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="400" y="80" width="240" height="45" as="geometry"/></mxCell>
+    <mxCell id="QD" value="🗄 Qdrant Vector DB (:6333)
+Layer A · Layer B" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#FFEDD5;strokeColor=#EA580C;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="400" y="140" width="240" height="48" as="geometry"/></mxCell>
+    <mxCell id="RD" value="🧠 Redis Store (:6379)
+chat history" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#FFEDD5;strokeColor=#EA580C;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="400" y="205" width="240" height="45" as="geometry"/></mxCell>
+    <mxCell id="LOG" value="📝 JSONL Log File
+local storage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#475569;fontColor=#0F172A;fontSize=10;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="400" y="265" width="240" height="42" as="geometry"/></mxCell>
+    <mxCell id="E_BR" value="HTTP / SSE" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="BR" target="API" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E_OLL" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="API" target="OLL" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E_VFC" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="API" target="VFC" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E_QD" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="API" target="QD" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E_RD" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="API" target="RD" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="E_LOG" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;fontSize=9;fontColor=#0F172A;" edge="1" source="API" target="LOG" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+  </root>
+</mxGraphModel>
