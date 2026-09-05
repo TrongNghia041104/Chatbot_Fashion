@@ -17,16 +17,21 @@ qdrant_data/
 qdrant_storage/
 redis_data/
 storage/
-images/
+images_49k/
+
+# Runtime-generated logs & outputs
+logs/
+outputs/
 
 # Datasets
 data/metadata/
+data/LayerB/
 Document/
 English/
-# Vietnamese/
+Vietnamese/
 *.zip
 *.pt
-
+evaluation/
 # Bỏ comment 2 dòng dưới nếu bạn có các file csv/jsonl lớn nằm rải rác bên ngoài mà không muốn push lên
 # *.jsonl
 # *.csv

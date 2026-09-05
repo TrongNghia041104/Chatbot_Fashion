@@ -9,7 +9,7 @@ Chatbot tư vấn thời trang sử dụng kỹ thuật **RAG (Retrieval-Augment
 - 🔍 **Tìm kiếm sản phẩm** thông minh với RAG (BGE-M3 + Qdrant)
 - 👗 **Tư vấn phối đồ** theo vóc dáng, tone da, phong cách (Layer B)
 - 📷 **Phân tích hình ảnh**: nhận diện vóc dáng người dùng, caption sản phẩm
-- 💬 **Lịch sử hội thoại** tự động tóm tắt (Redis)
+- 💬 **Lịch sử hội thoại gần** qua Redis; có thể bật tóm tắt khi cần
 - ⚡ **Streaming response** qua SSE
 
 ---
@@ -58,7 +58,7 @@ Chatbot_Fashion/
 ### 1. Yêu cầu
 
 - Python 3.10+
-- [Ollama](https://ollama.ai/) với các models: `bge-m3`, `qwen3:4b-instruct`, `qwen2.5vl:3b`
+- Ollama local hoặc qua SSH tunnel với các model: `bge-m3`, `qwen3:4b-instruct`, `qwen2.5vl:3b`
 - Docker & Docker Compose
 
 ### 2. Cài dependencies
@@ -101,6 +101,10 @@ Tất cả cấu hình (URLs, model names, thresholds, keywords) nằm trong [`a
 
 ## Tài liệu thêm
 
-Xem thêm trong thư mục [`docs/`](docs/):
-- [`SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) — Hướng dẫn cài đặt chi tiết
-- [`PROMPT_WebDemo_FashionChatbot.md`](docs/PROMPT_WebDemo_FashionChatbot.md) — Prompt engineering notes
+Đọc từ [`docs/00_README_FIRST.md`](docs/00_README_FIRST.md). Bộ tài liệu được chia thành ba đường đọc cho Hội đồng, nhóm viết báo cáo và người tiếp quản kỹ thuật.
+
+- [`docs/01_SYSTEM_OVERVIEW.md`](docs/01_SYSTEM_OVERVIEW.md) — Tổng quan ngắn cho Hội đồng.
+- [`docs/02_SETUP_AND_MODELS.md`](docs/02_SETUP_AND_MODELS.md) — Cài đặt, model và endpoint.
+- [`docs/04_RUNTIME_REQUEST_FLOW.md`](docs/04_RUNTIME_REQUEST_FLOW.md) — Luồng request end-to-end.
+- [`docs/05_INTENT_ROUTER_DECISION.md`](docs/05_INTENT_ROUTER_DECISION.md) — Intent, decision, route và slot policy.
+- [`docs/10_REPORT_WRITING_GUIDE.md`](docs/10_REPORT_WRITING_GUIDE.md) — Khung viết chương kiến trúc/luồng xử lý.
