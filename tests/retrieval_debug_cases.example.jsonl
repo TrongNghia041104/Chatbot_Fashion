@@ -1,0 +1,4 @@
+{"query":"tìm áo sơ mi trắng đi làm cho nữ","expected_route":"product_search","expected_categories":["Áo"],"notes":"Câu dễ: kiểm tra Layer A có lấy đúng nhóm áo/sơ mi/trắng/công sở không."}
+{"query":"cho tôi xem váy đen đi tiệc","expected_route":"product_search","expected_categories":["Đầm","Chân váy"],"notes":"Câu sản phẩm có màu + dịp, dùng để soi dense retrieval và rerank."}
+{"query":"phối đồ đi tiệc cho dáng quả lê","expected_route":"outfit_advice","profile":{"dang_nguoi":"Dáng quả lê"},"notes":"Câu outfit: kiểm tra Layer B rule, mapping category, rồi Layer A product retrieval."}
+{"query":"xem thêm sản phẩm khác","expected_route":"clarify","notes":"Câu follow-up không có lịch sử: nên hỏi lại hoặc cần previous_search."}

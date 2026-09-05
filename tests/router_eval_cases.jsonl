@@ -1,0 +1,49 @@
+{"id":"product_01","query":"tìm áo sơ mi trắng","intent":"product_discovery","action":"search","route":"text_product_search"}
+{"id":"product_02","query":"ao thun den cho nu","intent":"product_discovery","action":"search","route":"text_product_search"}
+{"id":"product_03","query":"giày thể thao nữ","intent":"product_discovery","action":"search","route":"text_product_search"}
+{"id":"product_04","query":"cho xem túi xách màu nâu","intent":"product_discovery","action":"search","route":"text_product_search"}
+{"id":"product_05","query":"áo này giá bao nhiêu","intent":"product_discovery","action":"price_check","route":"text_product_search"}
+{"id":"product_06","query":"tìm váy dưới 500k","intent":"product_discovery","action":"price_check","route":"text_product_search"}
+{"id":"product_07","query":"áo sơ mi còn size M không","intent":"product_discovery","action":"size_check","route":"text_product_search"}
+{"id":"product_08","query":"mẫu này còn hàng không","intent":"product_discovery","action":"stock_check","route":"text_product_search"}
+{"id":"product_09","query":"so sánh áo khoác đen và áo khoác nâu","intent":"product_discovery","action":"compare","route":"text_product_search"}
+{"id":"product_10","query":"shop có quần jean nữ không","intent":"product_discovery","action":"search","route":"text_product_search"}
+{"id":"product_11","query":"tìm giúp phụ kiện đi tiệc","intent":"product_discovery","action":"search","route":"text_product_search"}
+{"id":"product_12","query":"dam cong so mau den","intent":"product_discovery","action":"search","route":"text_product_search"}
+{"id":"outfit_01","query":"phối đồ đi làm","intent":"outfit_advice","action":"create_outfit","route":"text_outfit_advice"}
+{"id":"outfit_02","query":"gợi ý outfit đi biển","intent":"outfit_advice","action":"create_outfit","route":"text_outfit_advice"}
+{"id":"outfit_03","query":"tôi nên mặc gì đi đám cưới","intent":"outfit_advice","action":"create_outfit","route":"text_outfit_advice"}
+{"id":"outfit_04","query":"mix match phong cách tối giản","intent":"outfit_advice","action":"create_outfit","route":"text_outfit_advice"}
+{"id":"outfit_05","query":"ăn mặc thế nào khi đi hẹn hò","intent":"outfit_advice","action":"create_outfit","route":"text_outfit_advice"}
+{"id":"outfit_06","query":"áo này mặc với gì","intent":"outfit_advice","action":"create_outfit","route":"text_outfit_advice"}
+{"id":"social_01","query":"xin chào","intent":"social","action":"greeting","route":"social_response"}
+{"id":"social_02","query":"hello","intent":"social","action":"greeting","route":"social_response"}
+{"id":"social_03","query":"cảm ơn bạn","intent":"social","action":"thanks","route":"social_response"}
+{"id":"social_04","query":"thank you","intent":"social","action":"thanks","route":"social_response"}
+{"id":"social_05","query":"tạm biệt","intent":"social","action":"goodbye","route":"social_response"}
+{"id":"profile_01","query":"profile của tôi có gì","intent":"profile_management","action":"read","route":"profile_state_handler"}
+{"id":"profile_02","query":"tôi là nam","intent":"profile_management","action":"update","route":"profile_state_handler"}
+{"id":"profile_03","query":"tư vấn đồ nữ","intent":"profile_management","action":"update","route":"profile_state_handler"}
+{"id":"profile_04","query":"xóa toàn bộ profile","intent":"profile_management","action":"clear_all","route":"profile_state_handler"}
+{"id":"profile_05","query":"tôi không phải dáng chữ nhật","intent":"profile_management","action":"delete_field","route":"profile_state_handler"}
+{"id":"scope_01","query":"2 + 2 = ?","intent":"out_of_scope","action":"redirect","route":"out_of_scope_redirect"}
+{"id":"scope_02","query":"giá bitcoin hôm nay","intent":"out_of_scope","action":"redirect","route":"out_of_scope_redirect"}
+{"id":"scope_03","query":"lập trình python","intent":"out_of_scope","action":"redirect","route":"out_of_scope_redirect"}
+{"id":"image_01","query":"phối đồ với món này","has_image":true,"intent":"outfit_advice","action":"style_image_item","route":"image_outfit_advice"}
+{"id":"image_02","query":"tìm sản phẩm giống ảnh","has_image":true,"intent":"product_discovery","action":"find_similar","route":"image_product_search"}
+{"id":"image_03","query":"phân tích dáng người","has_image":true,"intent":"profile_analysis","action":"analyze_full_profile","route":"profile_vlm_analysis"}
+{"id":"image_04","query":"phân tích tone da","has_image":true,"intent":"profile_analysis","action":"analyze_skin_tone","route":"profile_vlm_analysis"}
+{"id":"image_05","query":"phân tích dáng người rồi phối đồ","has_image":true,"intent":"profile_analysis","action":"analyze_then_style","route":"profile_vlm_analysis"}
+{"id":"image_06","query":"sản phẩm này của tôi là gì","has_image":true,"intent":"product_discovery","action":"identify_image_item","route":"image_product_search"}
+{"id":"image_07","query":"cho biết đây là gì","has_image":true,"intent":"product_discovery","action":"identify_image_item","route":"image_product_search"}
+{"id":"image_08","query":"nhan dien mon do nay","has_image":true,"intent":"product_discovery","action":"identify_image_item","route":"image_product_search"}
+{"id":"clarify_01","query":"xem thêm","intent":"unknown","action":"clarify","route":null,"missing_slot":"previous_search"}
+{"id":"clarify_02","query":"","has_image":true,"intent":"unknown","action":"inspect_image","route":null,"missing_slot":"image_context"}
+{"id":"boundary_01","query":"Tôi cần viết báo cáo","fast_match":false}
+{"id":"boundary_02","query":"Bài kiểm tra này rất cao","fast_match":false}
+{"id":"boundary_03","query":"Đây là một lời chào hỏi dài","fast_match":false}
+{"id":"boundary_04","query":"Tôi đang học giáo án điện tử","fast_match":false}
+{"id":"boundary_05","query":"Mời bạn vào phòng","fast_match":false}
+{"id":"boundary_06","query":"Hệ thống cần được đảm bảo","fast_match":false}
+{"id":"boundary_07","query":"Tài liệu này khá dài","fast_match":false}
+{"id":"boundary_08","query":"Chúng ta cần phản hồi nhanh","fast_match":false}
