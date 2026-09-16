@@ -1,6 +1,6 @@
 # Giải Thích Hệ Thống `Chatbot_RAG_MultiModal_ViFashionCLIP_research_demo_v3.ipynb`
 
-> **Tài liệu tham khảo cũ:** Một số ví dụ `confidence`, prompt và log trong file này phản ánh giai đoạn trước khi router được chuẩn hóa. Khi bàn giao hoặc viết báo cáo, bắt đầu từ [`00_README_FIRST.md`](00_README_FIRST.md); code trong `app/` là nguồn sự thật.
+> **Tài liệu tham khảo cũ:** Một số ví dụ `confidence`, prompt và log trong file này phản ánh giai đoạn trước khi router được chuẩn hóa. Khi bàn giao hoặc viết báo cáo, bắt đầu từ [`00_README_FIRST.md`](00_README_FIRST.md); code trong `apps/` và `src/fashion_rag/` là nguồn sự thật.
 
 Tài liệu này giải thích notebook `Chatbot_RAG_MultiModal_ViFashionCLIP_research_demo_v3.ipynb` theo hướng đọc từ con số 0 vẫn hiểu được. Mục tiêu không chỉ là biết “hàm nào làm gì”, mà là đổi cách nhìn: đây không phải một chatbot gọi LLM đơn thuần, mà là một hệ thống điều phối nhiều loại trí tuệ nhỏ, mỗi loại chịu trách nhiệm cho một phần rất cụ thể của bài toán tư vấn thời trang.
 

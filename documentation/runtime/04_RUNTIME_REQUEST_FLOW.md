@@ -2,7 +2,7 @@
 
 ## Điểm vào
 
-`POST /api/chat` trong `app/api.py` nhận multipart form: `message`, `session_id`, `image`, `developer_mode`. Kết quả được stream bằng Server-Sent Events.
+`POST /api/chat` trong `apps/api/api.py` nhận multipart form: `message`, `session_id`, `image`, `developer_mode`. Kết quả được stream bằng Server-Sent Events.
 
 ## Luồng chung
 

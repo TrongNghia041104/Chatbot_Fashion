@@ -1,4 +1,4 @@
-# INTENT_MODULE.md — Deep Dive: `app/core/intent.py`
+# INTENT_MODULE.md — Deep Dive: `src/fashion_rag/core/intent.py`
 
 > **Mục tiêu**: Giúp developer (mới hoặc cũ) hiểu rõ module `intent.py` hoạt động ra sao,
 > tại sao mỗi quyết định thiết kế lại được thực hiện như vậy, và cách mở rộng không phá vỡ hệ thống hiện tại.

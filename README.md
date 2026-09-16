@@ -18,30 +18,41 @@ Chatbot tư vấn thời trang sử dụng kỹ thuật **RAG (Retrieval-Augment
 
 ```
 Chatbot_Fashion/
-├── main.py                  ← Entry point (chạy server)
-├── docker-compose.yml       ← Qdrant + Redis
+├── main.py                       ← Entry point (chạy server)
+├── docker-compose.yml            ← Qdrant + Redis
 ├── requirements.txt
 │
-├── app/                     ← Package chính
-│   ├── config.py            ← Tất cả cấu hình tập trung
-│   ├── api.py               ← FastAPI backend
-│   ├── static/
-│   │   └── index.html       ← Web demo UI
-│   └── core/                ← Logic core
-│       ├── embeddings.py    ← BGE-M3 wrapper
-│       ├── vector_store.py  ← Qdrant + Layer B indexing
-│       ├── llm.py           ← LLM + Prompts
-│       ├── vision.py        ← Vision functions (Qwen2.5-VL)
-│       ├── intent.py        ← Intent detection
-│       ├── outfit.py        ← Outfit matching (Layer B)
-│       ├── history.py       ← Redis chat history
-│       └── chains.py        ← RAG pipeline assembly
+├── apps/api/                     ← FastAPI backend
+│   ├── api.py
+│   └── static/
+│       └── index.html            ← Web demo UI
+│
+├── src/fashion_rag/               ← Package chính
+│   ├── config.py                 ← Tất cả cấu hình tập trung
+│   ├── core/                     ← Hạ tầng dùng chung + router
+│   │   ├── intent.py             ← Intent detection / routing
+│   │   ├── security.py           ← Validation, grounding, log
+│   │   └── telemetry.py
+│   ├── domain/                   ← Entity, value object, port (không phụ thuộc hạ tầng)
+│   │   ├── entities/decision.py  ← IntentDecision
+│   │   ├── value_objects/enums.py
+│   │   └── ports/                ← EmbedderPort/RetrieverPort/LLMPort
+│   ├── application/               ← Use case orchestration
+│   │   ├── chat/                 ← chains.py, profile.py
+│   │   └── recommendation/       ← outfit.py (Layer B)
+│   ├── modules/                   ← Pipeline nghiệp vụ
+│   │   ├── retrieval/            ← image_search.py
+│   │   └── ingestion/            ← product_data.py
+│   └── infrastructure/            ← Adapter công nghệ cụ thể
+│       ├── vectorstores/         ← Qdrant + Layer B indexing
+│       ├── embeddings/           ← BGE-M3 / ViFashionCLIP wrapper
+│       ├── llms/                 ← LLM + Prompts, Vision (Qwen2.5-VL)
+│       └── cache/                ← Redis chat history
 │
 ├── data/
 │   ├── metadata/            ← Fashion product JSONL files (20 categories)
 │   └── stylists/            ← Layer B knowledge (Female + Male)
 │
-├── images/                  ← Ảnh sản phẩm
 ├── notebooks/               ← Jupyter notebooks thực nghiệm
 ├── docs/                    ← Tài liệu
 ├── tests/
@@ -78,7 +89,7 @@ docker-compose up -d
 ```bash
 python main.py
 # hoặc
-uvicorn app.api:app --reload --port 8000
+PYTHONPATH=src uvicorn apps.api.api:app --reload --port 8000
 ```
 
 Mở trình duyệt: http://localhost:8000
@@ -87,7 +98,7 @@ Mở trình duyệt: http://localhost:8000
 
 ## Cấu hình
 
-Tất cả cấu hình (URLs, model names, thresholds, keywords) nằm trong [`app/config.py`](app/config.py).
+Tất cả cấu hình (URLs, model names, thresholds, keywords) nằm trong [`src/fashion_rag/config.py`](src/fashion_rag/config.py).
 
 | Biến | Mặc định | Mô tả |
 |------|----------|-------|
@@ -101,10 +112,10 @@ Tất cả cấu hình (URLs, model names, thresholds, keywords) nằm trong [`a
 
 ## Tài liệu thêm
 
-Đọc từ [`docs/00_README_FIRST.md`](docs/00_README_FIRST.md). Bộ tài liệu được chia thành ba đường đọc cho Hội đồng, nhóm viết báo cáo và người tiếp quản kỹ thuật.
+Đọc từ [`documentation/00_README_FIRST.md`](documentation/00_README_FIRST.md). Bộ tài liệu được chia thành ba đường đọc cho Hội đồng, nhóm viết báo cáo và người tiếp quản kỹ thuật, và tổ chức theo 4 cụm chủ đề: `architecture/`, `setup/`, `runtime/`, `quality/`.
 
-- [`docs/01_SYSTEM_OVERVIEW.md`](docs/01_SYSTEM_OVERVIEW.md) — Tổng quan ngắn cho Hội đồng.
-- [`docs/02_SETUP_AND_MODELS.md`](docs/02_SETUP_AND_MODELS.md) — Cài đặt, model và endpoint.
-- [`docs/04_RUNTIME_REQUEST_FLOW.md`](docs/04_RUNTIME_REQUEST_FLOW.md) — Luồng request end-to-end.
-- [`docs/05_INTENT_ROUTER_DECISION.md`](docs/05_INTENT_ROUTER_DECISION.md) — Intent, decision, route và slot policy.
-- [`docs/10_REPORT_WRITING_GUIDE.md`](docs/10_REPORT_WRITING_GUIDE.md) — Khung viết chương kiến trúc/luồng xử lý.
+- [`architecture/01_SYSTEM_OVERVIEW.md`](documentation/architecture/01_SYSTEM_OVERVIEW.md) — Tổng quan ngắn cho Hội đồng.
+- [`setup/02_SETUP_AND_MODELS.md`](documentation/setup/02_SETUP_AND_MODELS.md) — Cài đặt, model và endpoint.
+- [`runtime/04_RUNTIME_REQUEST_FLOW.md`](documentation/runtime/04_RUNTIME_REQUEST_FLOW.md) — Luồng request end-to-end.
+- [`architecture/05_INTENT_ROUTER_DECISION.md`](documentation/architecture/05_INTENT_ROUTER_DECISION.md) — Intent, decision, route và slot policy.
+- [`quality/10_REPORT_WRITING_GUIDE.md`](documentation/quality/10_REPORT_WRITING_GUIDE.md) — Khung viết chương kiến trúc/luồng xử lý.

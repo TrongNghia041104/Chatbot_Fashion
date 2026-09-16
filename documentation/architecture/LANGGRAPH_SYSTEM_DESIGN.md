@@ -1,8 +1,8 @@
 # De xuat so do LangGraph cho Fashion RAG Chatbot
 
-> **Đề xuất tương lai, chưa phải runtime hiện tại:** Web app production hiện điều phối bằng `app/api.py` và `app/core/intent.py`, chưa chạy LangGraph. Xem [`04_RUNTIME_REQUEST_FLOW.md`](04_RUNTIME_REQUEST_FLOW.md) để mô tả đúng hệ thống đang demo.
+> **Đề xuất tương lai, chưa phải runtime hiện tại:** Web app production hiện điều phối bằng `apps/api/api.py` và `src/fashion_rag/core/intent.py`, chưa chạy LangGraph. Xem [`04_RUNTIME_REQUEST_FLOW.md`](../runtime/04_RUNTIME_REQUEST_FLOW.md) để mô tả đúng hệ thống đang demo.
 
-Tai lieu nay mo ta cach co the dua LangGraph vao pipeline hien tai cua he thong Fashion RAG Chatbot. Muc tieu khong phai thay the Qdrant, embedding, Ollama hay cac chain dang co, ma la tach phan dieu phoi trong `app/api.py` thanh mot state graph ro rang, de debug va mo rong hon.
+Tai lieu nay mo ta cach co the dua LangGraph vao pipeline hien tai cua he thong Fashion RAG Chatbot. Muc tieu khong phai thay the Qdrant, embedding, Ollama hay cac chain dang co, ma la tach phan dieu phoi trong `apps/api/api.py` thanh mot state graph ro rang, de debug va mo rong hon.
 
 ---
 
@@ -149,20 +149,20 @@ class ChatState(TypedDict, total=False):
 
 | LangGraph node | Vai tro | Code hien tai co the tai su dung |
 |---|---|---|
-| `validate_input` | Kiem tra do dai, prompt injection, query rong | `app.core.security.validate_user_query` |
-| `detect_image_type` | Phan loai anh nguoi/san pham | `app.core.vision.detect_image_type` |
-| `analyze_person_image` | Trich xuat dang nguoi, tone da | `app.core.vision.analyze_person_image` |
-| `caption_product_image` | Caption anh khi image search truc tiep khong co ket qua | `app.core.vision.caption_product_image` |
-| `image_product_search` | Tim san pham bang anh | `app.core.image_search.search_products_by_image` |
-| `route_request` | Chon route/intent/action/rewrite query | `app.core.intent.route_user_request` |
-| `clarify_or_fallback` | Neu mo ho nhieu lan thi fallback sang search | logic hien trong `app/api.py` |
-| `product_text_search` | Chuan bi RAG text search | `app.core.chains.get_fast_search_chain` |
-| `build_outfit_context` | Tim Layer B rule va san pham Layer A | `app.core.outfit.build_outfit_context` |
+| `validate_input` | Kiem tra do dai, prompt injection, query rong | `fashion_rag.core.security.validate_user_query` |
+| `detect_image_type` | Phan loai anh nguoi/san pham | `fashion_rag.infrastructure.llms.vision.detect_image_type` |
+| `analyze_person_image` | Trich xuat dang nguoi, tone da | `fashion_rag.infrastructure.llms.vision.analyze_person_image` |
+| `caption_product_image` | Caption anh khi image search truc tiep khong co ket qua | `fashion_rag.infrastructure.llms.vision.caption_product_image` |
+| `image_product_search` | Tim san pham bang anh | `fashion_rag.modules.retrieval.image_search.search_products_by_image` |
+| `route_request` | Chon route/intent/action/rewrite query | `fashion_rag.core.intent.route_user_request` |
+| `clarify_or_fallback` | Neu mo ho nhieu lan thi fallback sang search | logic hien trong `apps/api/api.py` |
+| `product_text_search` | Chuan bi RAG text search | `fashion_rag.application.chat.chains.get_fast_search_chain` |
+| `build_outfit_context` | Tim Layer B rule va san pham Layer A | `fashion_rag.application.recommendation.outfit.build_outfit_context` |
 | `generate_rag_answer` | Sinh cau tra loi dua tren retrieved docs | `get_fast_search_chain().stream(...)` |
-| `generate_product_answer` | Sinh cau tra loi cho docs tu image search | `app.core.chains.get_product_answer_chain` |
-| `generate_outfit_answer` | Sinh tu van outfit dua tren outfit context | `app.core.chains.get_outfit_chain` |
-| `grounding_check` | Kiem tra ma san pham bi bia | `app.core.security.check_answer_grounding` |
-| `log_turn` | Ghi log chat/eval-lite | `app.core.security.append_chat_turn_log` |
+| `generate_product_answer` | Sinh cau tra loi cho docs tu image search | `fashion_rag.application.chat.chains.get_product_answer_chain` |
+| `generate_outfit_answer` | Sinh tu van outfit dua tren outfit context | `fashion_rag.application.chat.chains.get_outfit_chain` |
+| `grounding_check` | Kiem tra ma san pham bi bia | `fashion_rag.core.security.check_answer_grounding` |
+| `log_turn` | Ghi log chat/eval-lite | `fashion_rag.core.security.append_chat_turn_log` |
 
 ---
 
@@ -307,9 +307,9 @@ Neu trinh bay trong do an/luan van, LangGraph giup he thong co diem manh ve kien
 
 Nen ap dung theo lo trinh nho de tranh lam hong pipeline dang chay:
 
-1. Tao `app/core/graph_state.py` chua `ChatState`.
-2. Tao `app/core/graph_nodes.py` boc cac ham hien co thanh node.
-3. Tao `app/core/chat_graph.py` khai bao `StateGraph`.
+1. Tao `src/fashion_rag/core/graph_state.py` chua `ChatState`.
+2. Tao `src/fashion_rag/core/graph_nodes.py` boc cac ham hien co thanh node.
+3. Tao `src/fashion_rag/core/chat_graph.py` khai bao `StateGraph`.
 4. Giu endpoint `/api/chat` cu de doi chieu.
 5. Tao endpoint thu nghiem `/api/chat_graph`.
 6. So sanh output, latency, grounding log giua pipeline cu va pipeline LangGraph.

@@ -170,15 +170,14 @@ Chatbot_Fashion/
 
 Chạy notebook hoặc chạy trực tiếp phần Data Pipeline:
 
-**Cách 1 — Dùng Jupyter Notebook:**
+**Cách 1 — Dùng script indexing:**
 ```bash
-jupyter notebook notebooks/Chatbot_RAG_MultiModal.ipynb
-# Chạy cell "PHẦN 3: Data Pipeline" (có thể mất 15-30 phút)
+python scripts/index_vifashionclip_collections.py --all
 ```
 
-**Cách 2 — Import trực tiếp từ app.core:**
+**Cách 2 — Import trực tiếp từ fashion_rag.core:**
 ```python
-from app.core.vector_store import vector_db
+from fashion_rag.infrastructure.vectorstores.vector_store import vector_db
 # Sau đó chạy các hàm indexing theo notebook hướng dẫn
 ```
 
@@ -200,12 +199,12 @@ venv\Scripts\activate
 python main.py
 
 # Cách 2: Chạy trực tiếp uvicorn
-uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
+PYTHONPATH=src uvicorn apps.api.api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Kết quả mong đợi:
 ```
-[INFO] Đang load app.core...
+[INFO] Đang load fashion_rag.core...
 [INFO] Đang load Embedding model BGE-M3...
 [INFO] Đang kết nối Qdrant Docker (localhost:6333)...
 [OK] Qdrant + Retriever sẵn sàng!
@@ -214,7 +213,7 @@ Kết quả mong đợi:
 [OK] LLM sẵn sàng!
 [OK] Redis history sẵn sàng!
 [OK] RAG Pipeline sẵn sàng!
-[OK] app.core loaded!
+[OK] fashion_rag.core loaded!
 INFO: Uvicorn running on http://0.0.0.0:8000
 ```
 
@@ -227,7 +226,7 @@ INFO: Uvicorn running on http://0.0.0.0:8000
 # http://localhost:8000
 
 # Hoặc mở file trực tiếp trong trình duyệt
-start app\static\index.html
+start apps\api\static\index.html
 ```
 
 ---
@@ -280,7 +279,7 @@ ollama pull qwen2.5vl:3b
 ```
 
 ### ❌ `GGML_ASSERT` lỗi khi phân tích ảnh
-Ảnh quá lớn (> 1024px). Hệ thống đã tự xử lý resize về 512px — nếu vẫn lỗi, giảm `VL_MAX_SIZE = 384` trong `app/core/vision.py`.
+Ảnh quá lớn (> 1024px). Hệ thống đã tự xử lý resize về 512px — nếu vẫn lỗi, giảm `VL_MAX_SIZE = 384` trong `src/fashion_rag/infrastructure/llms/vision.py`.
 
 ### ❌ Chatbot trả lời chậm (> 60s)
 - Kiểm tra GPU Vast.ai còn đang chạy không (instance có thể tự tắt)
@@ -297,20 +296,34 @@ Chatbot_Fashion/
 ├── docker-compose.yml             # Qdrant + Redis Stack
 ├── requirements.txt               # Python dependencies
 │
-├── app/
-│   ├── config.py                  # Cấu hình tập trung (URLs, models, constants)
+├── apps/api/
 │   ├── api.py                     # FastAPI backend + SSE streaming
-│   ├── static/
-│   │   └── index.html             # Giao diện web chat
-│   └── core/
-│       ├── embeddings.py          # BGE-M3 embedding wrapper
-│       ├── vector_store.py        # Qdrant + Layer B indexing
-│       ├── llm.py                 # LLM (Qwen) + tất cả prompts
-│       ├── vision.py              # Xử lý ảnh (Qwen2.5-VL)
-│       ├── intent.py              # Phân loại intent người dùng
-│       ├── outfit.py              # Logic phối đồ (Layer B)
-│       ├── history.py             # Redis chat history + summarization
-│       └── chains.py              # Lắp ráp RAG pipeline
+│   └── static/
+│       └── index.html             # Giao diện web chat
+│
+├── src/fashion_rag/
+│   ├── config.py                  # Cấu hình tập trung (URLs, models, constants)
+│   ├── core/
+│   │   ├── intent.py              # Phân loại intent người dùng (router)
+│   │   ├── security.py            # Validation, prompt injection, grounding
+│   │   └── telemetry.py           # Logging/observability
+│   ├── domain/
+│   │   ├── entities/decision.py   # IntentDecision (dataclass)
+│   │   ├── value_objects/enums.py # Modality/route/certainty constants
+│   │   └── ports/                 # EmbedderPort/RetrieverPort/LLMPort (LangChain interfaces)
+│   ├── application/
+│   │   ├── chat/chains.py         # Lắp ráp RAG pipeline
+│   │   ├── chat/profile.py        # Quản lý profile
+│   │   └── recommendation/outfit.py  # Logic phối đồ (Layer B)
+│   ├── modules/
+│   │   ├── retrieval/image_search.py # Tìm sản phẩm bằng ảnh
+│   │   └── ingestion/product_data.py # Chuẩn hóa dữ liệu sản phẩm
+│   └── infrastructure/
+│       ├── embeddings/embeddings.py  # BGE-M3 / ViFashionCLIP embedding wrapper
+│       ├── vectorstores/vector_store.py  # Qdrant + Layer B indexing
+│       ├── llms/llm.py            # LLM (Qwen) + tất cả prompts
+│       ├── llms/vision.py         # Xử lý ảnh (Qwen2.5-VL)
+│       └── cache/history.py       # Redis chat history + summarization
 │
 ├── data/
 │   ├── metadata/                  # Dữ liệu sản phẩm .jsonl (không commit)

@@ -48,7 +48,8 @@ Bạn cần có thư mục `Chatbot_Fashion` trên Vast.ai, gồm ít nhất:
 
 ```text
 Chatbot_Fashion/
-├── app/
+├── apps/
+├── src/
 ├── scripts/
 ├── requirements.txt
 └── Vietnamese/

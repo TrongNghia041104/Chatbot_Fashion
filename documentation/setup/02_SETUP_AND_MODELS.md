@@ -53,7 +53,7 @@ Mặc định hiện tại ưu tiên tốc độ demo: history summarization t�
 
 ## Đường dẫn dữ liệu cần kiểm tra trên máy mới
 
-`IMAGES_DIR` và `PRODUCT_IMAGE_ROOT` trong `app/config.py` đang là đường dẫn tuyệt đối tới bộ ảnh 65k. Người tiếp quản phải đổi hai biến này hoặc đưa chúng ra biến môi trường trước khi chuyển máy.
+`IMAGES_DIR` và `PRODUCT_IMAGE_ROOT` trong `src/fashion_rag/config.py` đang là đường dẫn tuyệt đối tới bộ ảnh 65k. Người tiếp quản phải đổi hai biến này hoặc đưa chúng ra biến môi trường trước khi chuyển máy.
 
 Kiểm tra thêm:
 
@@ -65,7 +65,7 @@ Kiểm tra thêm:
 ## Smoke test
 
 ```powershell
-python -m compileall -q app
+python -m compileall -q apps src
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 

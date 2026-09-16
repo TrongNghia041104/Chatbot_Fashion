@@ -1,6 +1,6 @@
 # RAG Debug Playbook
 
-> **Tài liệu bổ trợ:** Dùng cùng [`08_DEBUGGING_AND_LOGGING.md`](08_DEBUGGING_AND_LOGGING.md). Tên field/runtime contract mới nhất nằm trong bộ tài liệu đánh số từ [`00_README_FIRST.md`](00_README_FIRST.md).
+> **Tài liệu bổ trợ:** Dùng cùng [`08_DEBUGGING_AND_LOGGING.md`](08_DEBUGGING_AND_LOGGING.md). Tên field/runtime contract mới nhất nằm trong bộ tài liệu đánh số từ [`00_README_FIRST.md`](../00_README_FIRST.md).
 
 Mục tiêu của debug RAG không phải là nhìn câu trả lời cuối rồi đoán sai ở đâu. Mục tiêu là tách hệ thống thành từng tầng, in output thật của từng tầng, rồi hỏi: tầng này đã đưa đúng tín hiệu cho tầng sau chưa?
 

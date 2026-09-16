@@ -88,7 +88,7 @@ Một người cuối cùng phải rà soát thuật ngữ để không gọi in
 ## Checklist trước khi chốt chương
 
 - Mỗi sơ đồ có input/output và trách nhiệm từng khối.
-- Tên model/collection/dimension khớp `app/config.py`.
+- Tên model/collection/dimension khớp `src/fashion_rag/config.py`.
 - Luồng text và image được tách rõ.
 - Phân biệt Layer A và Layer B.
 - Có giới hạn hệ thống và dữ liệu tồn kho.

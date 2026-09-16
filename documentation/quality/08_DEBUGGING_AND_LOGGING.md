@@ -53,7 +53,7 @@ Cards xuất hiện trước answer LLM nên `total` dài không đồng nghĩa 
 ## Các kiểm tra nhanh
 
 ```powershell
-python -m compileall -q app
+python -m compileall -q apps src
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 

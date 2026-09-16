@@ -31,7 +31,7 @@ flowchart LR
     E --> Q[Qdrant image collection]
 ```
 
-Indexer nằm trong `app/core/image_search.py`; notebook giải thích là `04_image_retrieval_debug.ipynb`. Không tự index lại khi chỉ muốn search. Chỉ chạy index pipeline khi tạo mới collection hoặc thay model/ảnh/payload.
+Indexer nằm trong `src/fashion_rag/modules/retrieval/image_search.py`; notebook giải thích là `04_image_retrieval_debug.ipynb`. Không tự index lại khi chỉ muốn search. Chỉ chạy index pipeline khi tạo mới collection hoặc thay model/ảnh/payload.
 
 ## Pipeline Layer B
 
@@ -74,7 +74,7 @@ Không cần index lại khi chỉ đổi prompt LLM, CSS, router keyword, SSE h
 
 ## Kiểm tra trước khi dùng collection
 
-1. Tên collection khớp `app/config.py`.
+1. Tên collection khớp `src/fashion_rag/config.py`.
 2. Dimension khớp 512/1024.
 3. Distance là cosine theo index hiện tại.
 4. Số point hợp lý.
