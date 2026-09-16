@@ -9,7 +9,7 @@ import ollama
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 from langchain_core.messages import SystemMessage
 
-from app.config import (
+from fashion_rag.config import (
     HISTORY_ENABLE_SUMMARIZATION,
     HISTORY_MAX_MESSAGES,
     HISTORY_RECENT_KEEP,
@@ -18,7 +18,7 @@ from app.config import (
     OLLAMA_BASE_URL,
     REDIS_URL,
 )
-from app.core.llm import SUMMARIZE_PROMPT
+from fashion_rag.infrastructure.llms.llm import SUMMARIZE_PROMPT
 
 ollama_client = ollama.Client(host=OLLAMA_BASE_URL)
 

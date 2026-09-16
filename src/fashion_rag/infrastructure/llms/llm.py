@@ -6,7 +6,7 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
 from langchain_ollama import ChatOllama
 
-from app.config import (
+from fashion_rag.config import (
     LLM_MODEL,
     LLM_NUM_CTX,
     LLM_NUM_PREDICT,
@@ -14,7 +14,7 @@ from app.config import (
     LLM_TIMEOUT,
     OLLAMA_BASE_URL,
 )
-from app.core.vector_store import normalize_product_metadata
+from fashion_rag.infrastructure.vectorstores.vector_store import normalize_product_metadata
 
 
 llm = ChatOllama(

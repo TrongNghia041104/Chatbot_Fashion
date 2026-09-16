@@ -16,7 +16,7 @@ from qdrant_client.models import PointStruct
 from tqdm.auto import tqdm
 from transformers import CLIPModel, CLIPProcessor
 
-from app.config import (
+from fashion_rag.config import (
     IMAGE_EMBEDDING_BATCH_SIZE,
     IMAGE_SEARCH_MAX_PRODUCTS,
     IMAGE_SEARCH_SCORE_THRESHOLD,
@@ -27,8 +27,8 @@ from app.config import (
     QDRANT_COLLECTION_PRODUCT_IMAGE,
     TEACHER_MODEL_NAME,
 )
-from app.core.product_data import build_product_metadata, build_product_page_content
-from app.core.vector_store import get_qdrant_client, normalize_product_metadata
+from fashion_rag.modules.ingestion.product_data import build_product_metadata, build_product_page_content
+from fashion_rag.infrastructure.vectorstores.vector_store import get_qdrant_client, normalize_product_metadata
 
 
 class FashionCLIPImageEmbeddings:

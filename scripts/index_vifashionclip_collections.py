@@ -20,18 +20,20 @@ from tqdm.auto import tqdm
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from app.config import (  # noqa: E402
+from fashion_rag.config import (  # noqa: E402
     METADATA_FILE,
     PRODUCT_IMAGE_ROOT,
     PRODUCT_VECTOR_SIZE,
     QDRANT_COLLECTION_FASHION,
     QDRANT_COLLECTION_PRODUCT_IMAGE,
 )
-from app.core.embeddings import get_product_embeddings  # noqa: E402
-from app.core.image_search import run_main_image_index_pipeline  # noqa: E402
-from app.core.product_data import process_fashion_metadata  # noqa: E402
-from app.core.vector_store import get_qdrant_client  # noqa: E402
+from fashion_rag.infrastructure.embeddings.embeddings import get_product_embeddings  # noqa: E402
+from fashion_rag.modules.retrieval.image_search import run_main_image_index_pipeline  # noqa: E402
+from fashion_rag.modules.ingestion.product_data import process_fashion_metadata  # noqa: E402
+from fashion_rag.infrastructure.vectorstores.vector_store import get_qdrant_client  # noqa: E402
 
 
 def index_text_collection(

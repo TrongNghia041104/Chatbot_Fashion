@@ -34,11 +34,10 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from dataclasses import asdict, dataclass, field
 
 import ollama
 
-from app.config import (
+from fashion_rag.config import (
     DEFINITE_CHITCHAT,
     DEFINITE_GREETING,
     DEFINITE_OUTFIT,
@@ -85,54 +84,33 @@ BUSINESS_INTENTS = {
     INTENT_OUT_OF_SCOPE,
 }
 
-# Input modality là chiều độc lập với intent.
-# Một người dùng có thể muốn tìm sản phẩm (intent) bằng ảnh (modality),
-# hoặc bằng văn bản, hoặc cả hai — đây là hai quyết định riêng biệt.
-MODALITY_TEXT = "text"          # Chỉ có văn bản
-MODALITY_IMAGE = "image"        # Chỉ có ảnh (không có text kèm)
-MODALITY_TEXT_IMAGE = "text_image"  # Vừa có văn bản vừa có ảnh
-
-# Execution routes — Pipeline thực thi cuối cùng.
-# CHỈ có hàm resolve_route() được phép gán các giá trị này.
-# Mỗi route tương ứng với một handler pipeline trong api.py:
-#
-#   ROUTE_TEXT_PRODUCT_SEARCH   → RAG vector search bằng văn bản (ViFashionCLIP)
-#   ROUTE_IMAGE_PRODUCT_SEARCH  → RAG vector search bằng ảnh (FashionCLIP image)
-#   ROUTE_TEXT_OUTFIT_ADVICE    → LLM sinh gợi ý outfit từ văn bản + Layer B rules
-#   ROUTE_IMAGE_OUTFIT_ADVICE   → LLM sinh gợi ý outfit từ item trong ảnh
-#   ROUTE_PROFILE_VLM_ANALYSIS  → VLM phân tích dáng người / tone da từ ảnh
-#   ROUTE_PROFILE_STATE_HANDLER → CRUD profile trong session state
-#   ROUTE_SOCIAL_RESPONSE       → Trả lời chào hỏi / cảm ơn bằng template cố định
-#   ROUTE_OUT_OF_SCOPE_REDIRECT → Thông báo ngoài phạm vi + hướng dẫn dùng lại
-ROUTE_TEXT_PRODUCT_SEARCH = "text_product_search"
-ROUTE_IMAGE_PRODUCT_SEARCH = "image_product_search"
-ROUTE_TEXT_OUTFIT_ADVICE = "text_outfit_advice"
-ROUTE_IMAGE_OUTFIT_ADVICE = "image_outfit_advice"
-ROUTE_PROFILE_VLM_ANALYSIS = "profile_vlm_analysis"
-ROUTE_PROFILE_STATE_HANDLER = "profile_state_handler"
-ROUTE_SOCIAL_RESPONSE = "social_response"
-ROUTE_OUT_OF_SCOPE_REDIRECT = "out_of_scope_redirect"
-
-EXECUTION_ROUTES = {
-    ROUTE_TEXT_PRODUCT_SEARCH,
-    ROUTE_IMAGE_PRODUCT_SEARCH,
-    ROUTE_TEXT_OUTFIT_ADVICE,
+# Modality, route và certainty là value objects dùng chung cho IntentDecision —
+# định nghĩa đầy đủ (kèm giải thích) nằm ở fashion_rag.domain.value_objects.enums.
+from fashion_rag.domain.value_objects.enums import (  # noqa: E402
+    CERTAINTY_CLARIFICATION_REQUIRED,
+    CERTAINTY_CONTEXTUAL,
+    CERTAINTY_DETERMINISTIC,
+    CERTAINTY_LLM_ASSISTED,
+    EXECUTION_ROUTES,
+    MODALITY_IMAGE,
+    MODALITY_TEXT,
+    MODALITY_TEXT_IMAGE,
+    ROUTE_CHITCHAT,
+    ROUTE_CLARIFY,
+    ROUTE_GREETING,
     ROUTE_IMAGE_OUTFIT_ADVICE,
-    ROUTE_PROFILE_VLM_ANALYSIS,
-    ROUTE_PROFILE_STATE_HANDLER,
-    ROUTE_SOCIAL_RESPONSE,
+    ROUTE_IMAGE_PRODUCT_SEARCH,
+    ROUTE_OUT_OF_SCOPE,
     ROUTE_OUT_OF_SCOPE_REDIRECT,
-}
-
-# Compatibility aliases — Tên cũ được giữ lại để code ngoài (notebooks, API cũ)
-# không bị vỡ khi nội bộ đổi tên route. Code mới NÊN dùng tên explicit ở trên.
-ROUTE_PRODUCT_SEARCH = ROUTE_TEXT_PRODUCT_SEARCH
-ROUTE_OUTFIT_ADVICE = ROUTE_TEXT_OUTFIT_ADVICE
-ROUTE_PROFILE_INQUIRY = ROUTE_PROFILE_STATE_HANDLER
-ROUTE_OUT_OF_SCOPE = ROUTE_OUT_OF_SCOPE_REDIRECT
-ROUTE_GREETING = ROUTE_SOCIAL_RESPONSE
-ROUTE_CHITCHAT = ROUTE_SOCIAL_RESPONSE
-ROUTE_CLARIFY = "clarify"  # Nhãn kiểm soát — KHÔNG bao giờ được trả về làm route thực
+    ROUTE_OUTFIT_ADVICE,
+    ROUTE_PRODUCT_SEARCH,
+    ROUTE_PROFILE_INQUIRY,
+    ROUTE_PROFILE_STATE_HANDLER,
+    ROUTE_PROFILE_VLM_ANALYSIS,
+    ROUTE_SOCIAL_RESPONSE,
+    ROUTE_TEXT_OUTFIT_ADVICE,
+    ROUTE_TEXT_PRODUCT_SEARCH,
+)
 
 
 PRODUCT_ACTIONS = {
@@ -162,19 +140,6 @@ PROFILE_MANAGEMENT_ACTIONS = {
 }
 SOCIAL_ACTIONS = {"greeting", "thanks", "goodbye", "social"}
 
-# `certainty` — Mức độ chắc chắn của quyết định routing.
-# Khác với "confidence" (xác suất do LLM tự báo, không đáng tin),
-# `certainty` là nhãn có thể kiểm chứng được dựa trên cơ chế ra quyết định:
-#
-#   DETERMINISTIC          — Quyết định bằng code Python thuần túy (cao nhất)
-#   CONTEXTUAL             — Quyết định từ session state hoặc modality signal
-#   LLM_ASSISTED           — LLM đã tham gia phân loại (thấp hơn)
-#   CLARIFICATION_REQUIRED — Không đủ thông tin, cần hỏi lại người dùng
-CERTAINTY_DETERMINISTIC = "deterministic"
-CERTAINTY_CONTEXTUAL = "contextual"
-CERTAINTY_LLM_ASSISTED = "llm_assisted"
-CERTAINTY_CLARIFICATION_REQUIRED = "clarification_required"
-
 # Các source thuộc nhóm CONTEXTUAL (không phải LLM, không phải pure keyword)
 CONTEXTUAL_SOURCES = {
     "state",               # Quyết định từ session state (pending confirmation, v.v.)
@@ -197,115 +162,9 @@ CONTEXTUAL_SOURCES = {
 BLOCKING_SLOTS = {"user_goal", "previous_search", "image_context", "image_goal"}
 
 
-@dataclass
-class IntentDecision:
-    """Structured semantic decision plus an execution route.
-
-    Đây là **kết quả duy nhất** mà router trả về cho caller (api.py).
-    Nó gói gọn toàn bộ quyết định routing vào một object duy nhất,
-    bao gồm intent, modality, action, route thực thi, và trace debug.
-
-    `trace` chứa các bước xử lý ngắn gọn để debug. Nó cố ý tránh
-    chain-of-thought ẩn và chỉ lưu trữ kết quả policy có thể quan sát được.
-
-    Attributes:
-        intent (str): Mục đích nghiệp vụ — một trong các INTENT_* constants.
-        modality (str): Kiểu đầu vào — text / image / text_image.
-        action (str): Thao tác cụ thể trong intent (search, create_outfit, ...).
-        route (str | None): Pipeline thực thi — một trong ROUTE_* constants.
-            Nếu là None, caller phải xử lý clarification.
-        confidence (float): **Deprecated** — không dùng để routing.
-            Giữ lại tạm thời để notebooks cũ không bị vỡ.
-        certainty (str): Mức độ tin cậy của quyết định (xem CERTAINTY_* constants).
-            Đây là field đúng để routing, thay cho `confidence`.
-        rewrite_query (str): Query đã được viết lại để tối ưu cho retrieval.
-        entities (dict): Các thực thể trích xuất được: màu, category, dịp dùng, size.
-        image_context (dict): Kết quả phân tích ảnh từ VLM (caption, subject, ...).
-        missing_slots (list[str]): Các slot bị thiếu ngăn chặn thực thi.
-        needs_clarification (bool): True nếu cần hỏi lại người dùng trước khi thực thi.
-        clarification_question (str): Câu hỏi hiển thị cho người dùng khi cần làm rõ.
-        clarification_options (list[dict]): Các lựa chọn quick-reply cho câu hỏi làm rõ.
-        follow_up_question (str): Câu hỏi gợi ý sau khi đã thực thi (không chặn).
-        follow_up_options (list[dict]): Các lựa chọn quick-reply cho follow-up.
-        workflow (list[str]): Danh sách route thực thi theo thứ tự (dùng cho multi-step).
-        reason (str): Lý do ngắn gọn tại sao chọn route/intent này (cho logging).
-        source (str): Cơ chế ra quyết định ("keyword", "state", "llm", "fallback", ...).
-        trace (list[dict]): Chuỗi các bước xử lý để debug/audit.
-    """
-
-    intent: str
-    modality: str = MODALITY_TEXT
-    action: str = "search"
-    route: str | None = None
-    # Deprecated — Routing phải dùng `certainty`, không dùng số này.
-    # Giữ lại tạm thời để notebooks/UI cũ không bị vỡ.
-    confidence: float = 0.0
-    certainty: str = CERTAINTY_DETERMINISTIC
-    rewrite_query: str = ""
-    entities: dict = field(default_factory=dict)
-    image_context: dict = field(default_factory=dict)
-    missing_slots: list[str] = field(default_factory=list)
-    needs_clarification: bool = False
-    clarification_question: str = ""
-    clarification_options: list[dict] = field(default_factory=list)
-    follow_up_question: str = ""
-    follow_up_options: list[dict] = field(default_factory=list)
-    workflow: list[str] = field(default_factory=list)
-    reason: str = ""
-    source: str = "router"
-    trace: list[dict] = field(default_factory=list)
-
-    @property
-    def handler(self) -> str:
-        """Compatibility execution kind used by the existing chat loop.
-
-        Property này dịch route (chi tiết kỹ thuật) sang tên handler ngắn gọn
-        mà vòng lặp chat cũ (api.py) đang dùng. Code mới nên dùng `route` trực tiếp.
-
-        Returns:
-            str: Tên handler ngắn — "search", "image_search", "outfit",
-                 "profile_analysis", "profile_management", "social",
-                 "out_of_scope", hoặc "clarify" nếu chưa có route.
-        """
-        if self.needs_clarification or not self.route:
-            return "clarify"
-        if self.route == ROUTE_TEXT_PRODUCT_SEARCH:
-            return "search"
-        if self.route == ROUTE_IMAGE_PRODUCT_SEARCH:
-            return "image_search"
-        if self.route in {ROUTE_TEXT_OUTFIT_ADVICE, ROUTE_IMAGE_OUTFIT_ADVICE}:
-            return "outfit"
-        if self.route == ROUTE_PROFILE_VLM_ANALYSIS:
-            return "profile_analysis"
-        if self.route == ROUTE_PROFILE_STATE_HANDLER:
-            return "profile_management"
-        if self.route == ROUTE_SOCIAL_RESPONSE:
-            return "social"
-        if self.route == ROUTE_OUT_OF_SCOPE_REDIRECT:
-            return "out_of_scope"
-        return "clarify"
-
-    @property
-    def legacy_intent(self) -> str:
-        """Old short intent name retained only for external compatibility.
-
-        Alias của `handler` — giữ lại để các caller cũ không phải đổi code.
-        """
-        return self.handler
-
-    def to_debug_dict(self) -> dict:
-        """Serialize toàn bộ decision thành dict, bao gồm cả computed property `handler`.
-
-        Returns:
-            dict: Toàn bộ fields của IntentDecision cộng thêm key ``handler``.
-        """
-        data = asdict(self)
-        data["handler"] = self.handler
-        return data
-
-
-# Older imports continue to work while notebooks migrate to IntentDecision.
-RouteDecision = IntentDecision
+# IntentDecision là domain entity dùng chung — định nghĩa đầy đủ (docstring,
+# handler property, to_debug_dict) nằm ở fashion_rag.domain.entities.decision.
+from fashion_rag.domain.entities.decision import IntentDecision, RouteDecision  # noqa: E402
 
 
 def _trace(stage: str, result: str, detail: str = "") -> dict:

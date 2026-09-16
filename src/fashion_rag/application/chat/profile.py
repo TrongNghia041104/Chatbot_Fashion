@@ -6,7 +6,7 @@ VLM observations are candidates, not facts. They live in
 
 from __future__ import annotations
 
-from app.core.intent import IntentDecision, get_profile_inquiry_response
+from fashion_rag.core.intent import IntentDecision, get_profile_inquiry_response
 
 
 PROFILE_FIELDS = {"gender", "dang_nguoi", "tone_da"}

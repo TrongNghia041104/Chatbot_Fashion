@@ -11,15 +11,15 @@ from __future__ import annotations
 import os
 
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STYLISTS_DIR = os.path.join(DATA_DIR, "stylists")
 METADATA_DIR = os.path.join(DATA_DIR, "metadata")
-STATIC_DIR = os.path.join(BASE_DIR, "app", "static")
+STATIC_DIR = os.path.join(BASE_DIR, "apps", "api", "static")
 # IMAGES_DIR = os.path.join(BASE_DIR, "images")
 # PRODUCT_IMAGE_ROOT = IMAGES_DIR
-IMAGES_DIR = "D:/KHÓA LUẬN/WORKSPACE/Amazon_Lazada_Fashion_Metadata_65k/images"
-PRODUCT_IMAGE_ROOT = "D:/KHÓA LUẬN/WORKSPACE/Amazon_Lazada_Fashion_Metadata_65k/images"
+IMAGES_DIR = "D:/KHÓA LUẬN/WORKSPACE/data/raw/Amazon_Lazada_Fashion_Metadata_65k/images"
+PRODUCT_IMAGE_ROOT = "D:/KHÓA LUẬN/WORKSPACE/data/raw/Amazon_Lazada_Fashion_Metadata_65k/images"
 
 METADATA_FILE = os.path.join(METADATA_DIR, "meta_Amazon_Lazada_Fashion_65k.jsonl")
 LAYER_B_FEMALE_PATH = os.path.join(STYLISTS_DIR, "Layer_B_Female_Knowledge.json")

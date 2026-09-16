@@ -24,6 +24,8 @@ if hasattr(sys.stderr, "reconfigure"):
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
 
 DEFAULT_PRODUCT_SEARCH_CANDIDATE_K = 30
 DEFAULT_PRODUCT_SEARCH_PAGE_SIZE = 5
@@ -87,7 +89,7 @@ def score_text(value: Any) -> str:
 
 
 def doc_row(doc, rank: int | None = None) -> dict:
-    from app.core.vector_store import normalize_product_metadata
+    from fashion_rag.infrastructure.vectorstores.vector_store import normalize_product_metadata
 
     doc = normalize_product_metadata(doc)
     metadata = doc.metadata
@@ -139,7 +141,7 @@ def parse_profile(raw: str | None) -> dict:
 
 
 def decide_route(query: str, router_mode: str, state: dict | None = None) -> RouteDecision:
-    from app.core.intent import ROUTE_PRODUCT_SEARCH, RouteDecision, route_from_keywords, route_user_request
+    from fashion_rag.core.intent import ROUTE_PRODUCT_SEARCH, RouteDecision, route_from_keywords, route_user_request
 
     if router_mode == "keyword":
         decision = route_from_keywords(query, state=state)
@@ -159,8 +161,8 @@ def decide_route(query: str, router_mode: str, state: dict | None = None) -> Rou
 def debug_product_retrieval(query: str, k: int, page_size: int, threshold: float | None) -> dict:
     print("\n[Stage] Layer A product retrieval")
     print("Loading retrieval modules...")
-    from app.config import ENABLE_PRODUCT_RERANKER, RERANKER_TOP_N
-    from app.core.vector_store import diversity_filter_documents, get_product_vector_db, normalize_product_metadata, rerank_documents
+    from fashion_rag.config import ENABLE_PRODUCT_RERANKER, RERANKER_TOP_N
+    from fashion_rag.infrastructure.vectorstores.vector_store import diversity_filter_documents, get_product_vector_db, normalize_product_metadata, rerank_documents
 
     print(f"query={query!r} | k={k} | threshold={threshold} | reranker_env={ENABLE_PRODUCT_RERANKER}")
 
@@ -196,8 +198,8 @@ def debug_product_retrieval(query: str, k: int, page_size: int, threshold: float
 
 
 def _layer_b_query(collection: str, query_vector: list[float], search_filter, stage: str) -> tuple[str, Any | None]:
-    from app.config import LAYER_B_SCORE_THRESHOLD
-    from app.core.vector_store import client
+    from fashion_rag.config import LAYER_B_SCORE_THRESHOLD
+    from fashion_rag.infrastructure.vectorstores.vector_store import client
 
     response = client.query_points(
         collection_name=collection,
@@ -214,8 +216,8 @@ def debug_layer_b_rule(query: str, gender: str, profile: dict) -> dict:
     print("Loading Layer B retrieval modules...")
     from qdrant_client.http.models import FieldCondition, Filter, MatchAny
 
-    from app.config import LAYER_B_WILDCARD_DANG, LAYER_B_WILDCARD_TONE
-    from app.core.vector_store import get_rule_embeddings
+    from fashion_rag.config import LAYER_B_WILDCARD_DANG, LAYER_B_WILDCARD_TONE
+    from fashion_rag.infrastructure.vectorstores.vector_store import get_rule_embeddings
 
     collection = f"layer_b_{gender}"
     print(f"query={query!r} | collection={collection} | profile={profile}")
@@ -283,8 +285,8 @@ def debug_outfit_products(base_rule: dict, gender: str) -> dict:
     print("Loading outfit product retrieval modules...")
     from qdrant_client.http.models import FieldCondition, Filter, MatchAny
 
-    from app.core.outfit import find_outfit_details, get_layer_a_categories
-    from app.core.vector_store import diversity_filter_documents, get_product_vector_db, normalize_product_metadata
+    from fashion_rag.application.recommendation.outfit import find_outfit_details, get_layer_a_categories
+    from fashion_rag.infrastructure.vectorstores.vector_store import diversity_filter_documents, get_product_vector_db, normalize_product_metadata
 
     details = find_outfit_details(base_rule, gender)
     if not details:
@@ -332,8 +334,8 @@ def debug_outfit_products(base_rule: dict, gender: str) -> dict:
 
 
 def run_one_case(case: dict, args) -> dict:
-    from app.core.intent import detect_gender
-    from app.core.security import validate_user_query
+    from fashion_rag.core.intent import detect_gender
+    from fashion_rag.core.security import validate_user_query
 
     query = case["query"]
     profile = parse_profile(args.profile_json)

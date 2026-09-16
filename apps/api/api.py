@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import (
+from fashion_rag.config import (
     API_TITLE,
     API_VERSION,
     DEBUG_ROUTER_TRACE,
@@ -42,7 +42,7 @@ if os.path.exists(STATIC_DIR):
 def _preload_image_encoder() -> None:
     """Warm FashionCLIP in the background before the first demo request."""
     try:
-        from app.core.image_search import get_image_embeddings
+        from fashion_rag.modules.retrieval.image_search import get_image_embeddings
 
         get_image_embeddings()
         print("[OK] FashionCLIP image encoder preloaded.")
@@ -143,7 +143,7 @@ def _browser_image_url(value: str) -> str:
 
 def _is_reranker_enabled() -> bool:
     try:
-        from app.core.vector_store import is_reranker_enabled
+        from fashion_rag.infrastructure.vectorstores.vector_store import is_reranker_enabled
 
         return is_reranker_enabled()
     except Exception:
@@ -282,7 +282,7 @@ async def chat(
     """Route a request and stream observable results as Server-Sent Events."""
 
     async def event_stream():
-        from app.core.intent import (
+        from fashion_rag.core.intent import (
             ROUTE_IMAGE_OUTFIT_ADVICE,
             detect_gender,
             get_clarify_response,
@@ -290,8 +290,8 @@ async def chat(
             get_social_response,
             route_user_request,
         )
-        from app.core.profile import apply_profile_decision, sanitize_profile_candidate
-        from app.core.security import (
+        from fashion_rag.application.chat.profile import apply_profile_decision, sanitize_profile_candidate
+        from fashion_rag.core.security import (
             CommerceFactStreamFilter,
             append_chat_turn_log,
             check_answer_grounding,
@@ -299,7 +299,7 @@ async def chat(
             extract_product_ids_from_text,
             validate_user_query,
         )
-        from app.core.telemetry import TurnTelemetry
+        from fashion_rag.core.telemetry import TurnTelemetry
 
         state = sessions.setdefault(session_id, _new_session_state())
         profile = dict(state.get("profile") or {})
@@ -363,8 +363,8 @@ async def chat(
         )
 
         if image_present:
-            from app.core.image_search import search_products_by_image
-            from app.core.vision import analyze_person_image, describe_image_for_routing
+            from fashion_rag.modules.retrieval.image_search import search_products_by_image
+            from fashion_rag.infrastructure.llms.vision import analyze_person_image, describe_image_for_routing
 
             suffix = os.path.splitext(image.filename)[1] or ".jpg"
             tmp_path = None
@@ -603,8 +603,8 @@ async def chat(
 
         try:
             if execution_handler == "image_search":
-                from app.core.chains import get_product_answer_chain
-                from app.core.llm import format_documents_for_llm
+                from fashion_rag.application.chat.chains import get_product_answer_chain
+                from fashion_rag.infrastructure.llms.llm import format_documents_for_llm
 
                 yield make_event(
                     {
@@ -628,8 +628,8 @@ async def chat(
                 chain_input = {"input": active_query, "context": format_documents_for_llm(retrieved_docs)}
 
             elif execution_handler == "outfit":
-                from app.core.chains import get_outfit_chain
-                from app.core.outfit import build_outfit_context, build_outfit_context_from_image_docs
+                from fashion_rag.application.chat.chains import get_outfit_chain
+                from fashion_rag.application.recommendation.outfit import build_outfit_context, build_outfit_context_from_image_docs
 
                 yield make_event(
                     {
@@ -689,7 +689,7 @@ async def chat(
                 chain_input = {"input": active_query, "outfit_context": outfit_context}
 
             elif execution_handler == "search":
-                from app.core.chains import get_fast_search_chain
+                from fashion_rag.application.chat.chains import get_fast_search_chain
 
                 filter_summary = decision.entities or {}
                 yield make_event(

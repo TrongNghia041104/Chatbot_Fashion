@@ -7,7 +7,7 @@ from collections import Counter
 
 from qdrant_client.http.models import FieldCondition, Filter, MatchAny
 
-from app.config import (
+from fashion_rag.config import (
     CATEGORY_MAPPING,
     LAYER_B_FALLBACK_SCORE_THRESHOLD,
     LAYER_B_SCORE_THRESHOLD,
@@ -139,8 +139,8 @@ def build_layer_b_query_from_image_context(item_context: dict, user_query: str, 
     return " ".join(part for part in parts if part).strip()
 
 
-from app.core.embeddings import get_product_embeddings, get_rule_embeddings
-from app.core.vector_store import (
+from fashion_rag.infrastructure.embeddings.embeddings import get_product_embeddings, get_rule_embeddings
+from fashion_rag.infrastructure.vectorstores.vector_store import (
     client,
     diversity_filter_documents,
     ensure_layer_b_indexed,

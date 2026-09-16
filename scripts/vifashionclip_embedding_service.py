@@ -29,9 +29,11 @@ from pydantic import BaseModel, Field
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from app.config import PRODUCT_EMBEDDING_BATCH_SIZE, VIFASHIONCLIP_CHECKPOINT  # noqa: E402
-from app.core.embeddings import ViFashionCLIPTextEmbeddings  # noqa: E402
+from fashion_rag.config import PRODUCT_EMBEDDING_BATCH_SIZE, VIFASHIONCLIP_CHECKPOINT  # noqa: E402
+from fashion_rag.infrastructure.embeddings.embeddings import ViFashionCLIPTextEmbeddings  # noqa: E402
 
 
 app = FastAPI(title="ViFashionCLIP Embedding Service", version="1.0.0")

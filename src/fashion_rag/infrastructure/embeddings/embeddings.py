@@ -19,7 +19,7 @@ from langchain_ollama import OllamaEmbeddings
 from tqdm.auto import tqdm
 from transformers import AutoModel, AutoTokenizer
 
-from app.config import (
+from fashion_rag.config import (
     EMBEDDING_MODEL,
     OLLAMA_BASE_URL,
     PRODUCT_EMBEDDING_BATCH_SIZE,

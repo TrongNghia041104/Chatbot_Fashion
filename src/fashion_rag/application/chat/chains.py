@@ -8,9 +8,9 @@ from langchain_classic.chains import create_history_aware_retriever, create_retr
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
-from app.core.history import get_message_history
-from app.core.llm import QA_PROMPT, contextualize_q_prompt, doc_prompt, llm, outfit_prompt
-from app.core.vector_store import get_product_retriever
+from fashion_rag.infrastructure.cache.history import get_message_history
+from fashion_rag.infrastructure.llms.llm import QA_PROMPT, contextualize_q_prompt, doc_prompt, llm, outfit_prompt
+from fashion_rag.infrastructure.vectorstores.vector_store import get_product_retriever
 
 
 _full_chat_chain = None

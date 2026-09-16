@@ -11,7 +11,7 @@ import re
 import ollama
 from PIL import Image
 
-from app.config import (
+from fashion_rag.config import (
     LAYER_B_DANG_NGUOI,
     LAYER_B_TONE_DA,
     OLLAMA_BASE_URL,

@@ -17,17 +17,15 @@ qdrant_data/
 qdrant_storage/
 redis_data/
 storage/
-images_49k/
 
 # Runtime-generated logs & outputs
 logs/
 outputs/
+eval_outputs/
 
 # Datasets
 data/metadata/
 data/LayerB/
-Document/
-English/
 Vietnamese/
 *.zip
 *.pt

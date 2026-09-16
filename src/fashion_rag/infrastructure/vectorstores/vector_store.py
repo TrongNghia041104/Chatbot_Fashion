@@ -18,7 +18,7 @@ from qdrant_client.http.models import Distance, VectorParams
 from qdrant_client.models import PointStruct
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from app.config import (
+from fashion_rag.config import (
     ENABLE_PRODUCT_RERANKER,
     LAYER_B_FEMALE_PATH,
     LAYER_B_MALE_PATH,
@@ -37,7 +37,7 @@ from app.config import (
     RETRIEVAL_RETRY_COUNT,
     RETRIEVAL_RETRY_SLEEP,
 )
-from app.core.embeddings import get_product_embeddings, get_rule_embeddings
+from fashion_rag.infrastructure.embeddings.embeddings import get_product_embeddings, get_rule_embeddings
 
 
 _client: QdrantClient | None = None

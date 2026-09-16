@@ -9,7 +9,7 @@ from datetime import datetime
 
 from langchain_core.documents import Document
 
-from app.config import (
+from fashion_rag.config import (
     CHAT_TURN_LOG_FILE,
     CHATBOT_LOG_DIR,
     HALLUCINATION_LOG_FILE,
