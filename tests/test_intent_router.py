@@ -1,6 +1,6 @@
 import unittest
 
-from app.core.intent import (
+from fashion_rag.core.intent import (
     INTENT_OUTFIT_ADVICE,
     INTENT_PRODUCT_DISCOVERY,
     INTENT_PROFILE_ANALYSIS,

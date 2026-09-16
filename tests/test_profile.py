@@ -1,7 +1,7 @@
 import unittest
 
-from app.core.intent import IntentDecision, INTENT_PROFILE_MANAGEMENT
-from app.core.profile import apply_profile_decision
+from fashion_rag.core.intent import IntentDecision, INTENT_PROFILE_MANAGEMENT
+from fashion_rag.application.chat.profile import apply_profile_decision
 
 
 class ProfileStateTests(unittest.TestCase):

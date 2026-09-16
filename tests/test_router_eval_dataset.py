@@ -2,14 +2,14 @@ import json
 import unittest
 from pathlib import Path
 
-from app.core.intent import (
+from fashion_rag.core.intent import (
     CERTAINTY_CLARIFICATION_REQUIRED,
     CERTAINTY_DETERMINISTIC,
     CERTAINTY_LLM_ASSISTED,
     coerce_intent_decision,
     route_from_keywords,
 )
-from app.core.security import CommerceFactStreamFilter
+from fashion_rag.core.security import CommerceFactStreamFilter
 
 
 CASES_FILE = Path(__file__).with_name("router_eval_cases.jsonl")

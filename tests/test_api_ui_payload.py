@@ -2,14 +2,14 @@ import unittest
 
 from langchain_core.documents import Document
 
-from app.api import (
+from apps.api.api import (
     _browser_image_url,
     _decision_event,
     _docs_to_images,
     _image_identification_reply,
     _retrieval_progress_message,
 )
-from app.core.intent import route_user_request
+from fashion_rag.core.intent import route_user_request
 
 
 class ApiUiPayloadTests(unittest.TestCase):
