@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections import Counter
 
+import ollama
 from qdrant_client.http.models import FieldCondition, Filter, MatchAny
 
 from fashion_rag.config import (
@@ -13,6 +15,8 @@ from fashion_rag.config import (
     LAYER_B_SCORE_THRESHOLD,
     LAYER_B_WILDCARD_DANG,
     LAYER_B_WILDCARD_TONE,
+    LLM_MODEL,
+    OLLAMA_BASE_URL,
     OUTFIT_MAX_PRODUCT_SLOTS,
     PHU_KIEN_KEYWORD_ROUTER,
 )
@@ -361,37 +365,50 @@ def get_products_for_outfit(
     product_type: str,
     layer_b_category: str,
     phong_cach: str,
+    gender: str = "female",
     vdb=None,
 ) -> list:
     """Search Layer A products for one outfit item."""
     result = get_products_for_outfit_batch(
         [(layer_b_category, product_type)],
         phong_cach,
+        gender=gender,
         vdb=vdb,
     )
     return result.get(layer_b_category, [])
 
 
-def _layer_a_filter(layer_b_category: str, product_type: str) -> Filter | None:
-    """Build the Qdrant category filter for one outfit slot."""
+# Sản phẩm Layer A có trường department = Nam / Nữ / Unisex. Lọc theo giới tính
+# để một công thức nữ không kéo về áo/quần nam (và ngược lại); Unisex luôn hợp lệ.
+GENDER_TO_DEPARTMENTS = {
+    "female": ["Nữ", "Unisex"],
+    "male": ["Nam", "Unisex"],
+}
+
+
+def _layer_a_filter(layer_b_category: str, product_type: str, gender: str = "female") -> Filter | None:
+    """Build the Qdrant category + gender filter for one outfit slot."""
+    conditions = []
     target_categories = get_layer_a_categories(layer_b_category, product_type)
-    if not target_categories:
-        return None
-    return Filter(
-        must=[
-            FieldCondition(
-                key="metadata.category",
-                match=MatchAny(any=target_categories),
-            )
-        ]
-    )
+    if target_categories:
+        conditions.append(
+            FieldCondition(key="metadata.category", match=MatchAny(any=target_categories))
+        )
+    departments = GENDER_TO_DEPARTMENTS.get(gender)
+    if departments:
+        conditions.append(
+            FieldCondition(key="metadata.department", match=MatchAny(any=departments))
+        )
+    return Filter(must=conditions) if conditions else None
 
 
 def get_products_for_outfit_batch(
     items: list[tuple[str, str]],
     phong_cach: str,
+    gender: str = "female",
     vdb=None,
     metrics: dict | None = None,
+    style_hint: str = "",
 ) -> dict[str, list]:
     """Embed all outfit product queries once, then query Qdrant per slot.
 
@@ -408,7 +425,13 @@ def get_products_for_outfit_batch(
         return {}
 
     vector_db = vdb or get_product_vector_db()
-    queries = [f"{product_type} {phong_cach}" for _, product_type in items]
+    # Ưu tiên query tiếng Việt: category Layer B (danh từ món đồ tiếng Việt) +
+    # style_hint tiếng Việt từ brief. Không có style_hint thì quay về cách cũ
+    # (product_type + phong_cach tiếng Anh) để không phá các caller khác.
+    queries = [
+        f"{layer_b_category} {style_hint}".strip() if style_hint else f"{product_type} {phong_cach}"
+        for layer_b_category, product_type in items
+    ]
 
     # ViFashionCLIP local xử lý cả outfit trong một batch để giảm overhead CPU.
     vectors = get_product_embeddings().embed_documents(queries)
@@ -417,7 +440,7 @@ def get_products_for_outfit_batch(
 
     results: dict[str, list] = {}
     for (layer_b_category, product_type), vector in zip(items, vectors):
-        search_filter = _layer_a_filter(layer_b_category, product_type)
+        search_filter = _layer_a_filter(layer_b_category, product_type, gender)
         raw_results = vector_db.similarity_search_with_score_by_vector(
             embedding=vector,
             k=8,
@@ -453,9 +476,11 @@ def _product_card_payload(doc, slot: str, fallback_title: str) -> dict:
 def _format_outfit_context(
     base_rule: dict,
     outfit_rules: dict,
+    gender: str = "female",
     profile: dict | None = None,
     base_item_context: dict | None = None,
     metrics: dict | None = None,
+    style_hint: str = "",
 ) -> tuple[str, list]:
     """Format selected Layer B rules and Layer A products for the answer chain."""
     if not outfit_rules:
@@ -468,7 +493,9 @@ def _format_outfit_context(
     products_by_category = get_products_for_outfit_batch(
         list(product_types.items()),
         base_rule["phong_cach"],
+        gender=gender,
         metrics=metrics,
+        style_hint=style_hint,
     )
     outfit_products = {}
     for layer_b_category, rule in outfit_rules.items():
@@ -535,6 +562,54 @@ def _format_outfit_context(
     return "\n".join(lines), images_data
 
 
+_brief_client = ollama.Client(host=OLLAMA_BASE_URL)
+
+OUTFIT_BRIEF_PROMPT = (
+    "Bạn trích thông tin cốt lõi từ yêu cầu phối đồ của khách (tiếng Việt).\n"
+    "Bỏ qua lời chào và câu thừa. Suy ra bối cảnh mặc từ dịp "
+    "(ví dụ: 'phỏng vấn' → công sở trang trọng; 'đi biển' → nghỉ dưỡng).\n"
+    "Trả về JSON có đúng 3 khóa chuỗi:\n"
+    "- dip: dịp/bối cảnh mặc (vd: phỏng vấn công sở, đi làm, dạo phố, đám cưới), '' nếu không rõ.\n"
+    "- phong_cach: phong cách (vd: trang trọng lịch sự, thanh lịch, năng động), '' nếu không rõ.\n"
+    "- mua: một trong xuân/hạ/thu/đông, hoặc '' nếu không nhắc.\n\n"
+    "Yêu cầu: __QUERY__"
+)
+
+
+def extract_outfit_brief(user_query: str, metrics: dict | None = None) -> dict:
+    """Dùng LLM bóc {dip, phong_cach, mua} từ câu chat lượm thượm.
+
+    Biến 'mai tôi có buổi phỏng vấn, mặc gì giờ' thành tín hiệu sạch
+    (dịp=phỏng vấn công sở, phong cách=trang trọng) để Layer B match đúng rule,
+    thay vì để cả câu chat làm nhiễu embedding. Lỗi → trả {} và caller dùng câu gốc.
+    """
+    try:
+        response = _brief_client.chat(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": OUTFIT_BRIEF_PROMPT.replace("__QUERY__", user_query)}],
+            options={"temperature": 0, "num_predict": 120},
+            format="json",
+        )
+        _count_metric(metrics, "llm_outfit_brief")
+        data = json.loads(response["message"]["content"])
+        return {key: str(data.get(key, "")).strip() for key in ("dip", "phong_cach", "mua")}
+    except Exception as exc:
+        print(f"[WARN] Outfit brief extraction failed: {exc}")
+        return {}
+
+
+def build_layer_b_query_from_brief(brief: dict, fallback: str) -> str:
+    """Dựng query Layer B sạch từ brief; quay về câu gốc nếu brief rỗng."""
+    parts = []
+    if brief.get("dip"):
+        parts.append(f"trang phục {brief['dip']}")
+    if brief.get("phong_cach"):
+        parts.append(brief["phong_cach"])
+    if brief.get("mua"):
+        parts.append(f"mùa {brief['mua']}")
+    return " ".join(parts).strip() or fallback
+
+
 def build_outfit_context(
     user_query: str,
     gender: str = "female",
@@ -543,7 +618,13 @@ def build_outfit_context(
 ) -> tuple[str, list]:
     """Build the full outfit context and product image payload for the UI."""
     started_at = time.perf_counter()
-    base_rule = find_matching_rule(user_query, gender, profile, metrics=metrics)
+    brief = extract_outfit_brief(user_query, metrics=metrics)
+    layer_b_query = build_layer_b_query_from_brief(brief, user_query)
+    # Tín hiệu tiếng Việt (dịp + phong cách) để tìm sản phẩm Layer A, thay cho
+    # nhãn phong_cach tiếng Anh trong rule (vd "Premium commute") vốn là nhiễu
+    # với model ViFashionCLIP tiếng Việt.
+    style_hint = " ".join(p for p in (brief.get("dip", ""), brief.get("phong_cach", "")) if p).strip()
+    base_rule = find_matching_rule(layer_b_query, gender, profile, metrics=metrics)
     _time_metric(metrics, "layer_b_base_rule", started_at)
     if not base_rule:
         return "", []
@@ -558,8 +639,10 @@ def build_outfit_context(
     result = _format_outfit_context(
         base_rule,
         outfit_rules,
+        gender=gender,
         profile=profile,
         metrics=metrics,
+        style_hint=style_hint,
     )
     _time_metric(metrics, "layer_a_products", started_at)
     return result
@@ -600,6 +683,7 @@ def build_outfit_context_from_image_docs(
     context, images = _format_outfit_context(
         base_rule,
         outfit_rules,
+        gender=gender,
         profile=profile,
         base_item_context=item_context,
         metrics=metrics,

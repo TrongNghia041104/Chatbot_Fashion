@@ -59,9 +59,11 @@ ROUTE_CLARIFY = "clarify"  # Nhãn kiểm soát — KHÔNG bao giờ được tr
 #
 #   DETERMINISTIC          — Quyết định bằng code Python thuần túy (cao nhất)
 #   CONTEXTUAL             — Quyết định từ session state hoặc modality signal
+#   SEMANTIC               — Quyết định bằng độ tương đồng embedding (Layer 3b)
 #   LLM_ASSISTED           — LLM đã tham gia phân loại (thấp hơn)
 #   CLARIFICATION_REQUIRED — Không đủ thông tin, cần hỏi lại người dùng
 CERTAINTY_DETERMINISTIC = "deterministic"
 CERTAINTY_CONTEXTUAL = "contextual"
+CERTAINTY_SEMANTIC = "semantic"
 CERTAINTY_LLM_ASSISTED = "llm_assisted"
 CERTAINTY_CLARIFICATION_REQUIRED = "clarification_required"

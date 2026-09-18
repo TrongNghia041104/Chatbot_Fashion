@@ -12,6 +12,10 @@ Tài liệu này là bản đồ bàn giao chính thức cho `research_demo_v3`.
 | [`quality/`](quality/) | Debug, đánh giá, viết báo cáo | 08, RAG_DEBUG_PLAYBOOK, 09, 10 |
 | [`archive/`](archive/) | Tài liệu cũ, đã bị thay thế | SYSTEM_ARCHITECTURE, GIAI_THICH_HE_THONG_RESEARCH_DEMO_V3 |
 
+## Hướng phát triển
+
+Kế hoạch nâng cấp (đánh giá định lượng, phát triển Agent, vá hạn chế): [`HUONG_PHAT_TRIEN.md`](HUONG_PHAT_TRIEN.md).
+
 ## Ba đường đọc
 
 | Người đọc | Mục tiêu | Thứ tự |

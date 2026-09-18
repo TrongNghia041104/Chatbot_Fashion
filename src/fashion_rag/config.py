@@ -251,6 +251,72 @@ STRICT_OUT_OF_SCOPE_PATTERNS = [
 MALE_KEYWORDS = ["nam", "con trai", "bạn trai", "chàng", "đàn ông", "bố", "chồng"]
 
 
+# ---------------------------------------------------------------------------
+# Layer 3b — Semantic intent routing
+# ---------------------------------------------------------------------------
+# Chèn giữa keyword (Layer 3) và LLM fallback (Layer 4). Khi keyword không khớp,
+# nhúng câu người dùng bằng BGE-M3 (đã dùng cho Layer B) rồi so độ tương đồng
+# với câu mẫu mỗi intent. Mục tiêu: bắt cách nói tự nhiên keyword bỏ sót và
+# giảm số lần phải gọi LLM.
+SEMANTIC_ROUTER_ENABLED = os.getenv("SEMANTIC_ROUTER_ENABLED", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+# ponytail: THRESHOLD/MARGIN là knob cần calibrate trên tập router_eval thực tế
+# (cosine bge-m3 điển hình 0.5–0.8). Hạ threshold nếu bỏ sót nhiều; tăng margin
+# nếu nhận nhầm giữa hai intent gần nhau.
+SEMANTIC_ROUTER_THRESHOLD = float(os.getenv("SEMANTIC_ROUTER_THRESHOLD", "0.55"))
+SEMANTIC_ROUTER_MARGIN = float(os.getenv("SEMANTIC_ROUTER_MARGIN", "0.05"))
+
+# Câu mẫu mỗi intent. Key trùng giá trị INTENT_* (chuỗi) để router map thẳng.
+# profile_analysis không có ở đây vì nó chỉ kích hoạt khi có ảnh (Layer 1).
+SEMANTIC_INTENT_EXAMPLES = {
+    "product_discovery": [
+        "tìm cho mình một chiếc áo khoác mùa đông",
+        "mình cần mua đôi giày thể thao đi bộ",
+        "có mẫu túi xách nào đẹp đẹp không",
+        "cho mình xem vài chiếc đầm dự tiệc",
+        "shop còn quần jean nam nào không",
+        "mình muốn kiếm một cái váy đi biển",
+        "gợi ý cho mình chiếc áo sơ mi trắng đi làm",
+    ],
+    "outfit_advice": [
+        "nay đi đám cưới thì mặc gì cho hợp",
+        "cái áo này phối với quần gì bây giờ",
+        "gợi ý giúp mình bộ đồ đi làm công sở",
+        "trời lạnh thế này nên mặc như thế nào",
+        "mình nên chọn trang phục ra sao cho buổi hẹn hò",
+        "cho mình xin ý tưởng phối đồ đi chơi cuối tuần",
+        "đi phỏng vấn xin việc nên ăn mặc kiểu gì",
+    ],
+    "profile_management": [
+        "bạn đang lưu những thông tin gì về mình vậy",
+        "cập nhật lại dáng người của mình nhé",
+        "xóa hết thông tin cá nhân của mình đi",
+        "mình muốn xem lại hồ sơ của mình",
+        "đổi tone da đã lưu thành da ngăm giúp mình",
+        "quên thông tin vóc dáng của mình đi nha",
+    ],
+    "social": [
+        "chào bạn nhé shop ơi",
+        "mình cảm ơn shop nhiều lắm",
+        "thôi mình đi đây tạm biệt nha",
+        "dạ vâng cảm ơn ạ",
+        "shop tư vấn dễ thương ghê",
+    ],
+    "out_of_scope": [
+        "hôm nay thời tiết ngoài trời thế nào",
+        "giá bitcoin bây giờ bao nhiêu rồi",
+        "kết quả trận bóng đá tối qua ra sao",
+        "chỉ mình cách nấu món phở với",
+        "dịch giúp mình câu tiếng anh này sang tiếng việt",
+        "một cộng một bằng mấy vậy",
+    ],
+}
+
+
 # Security and logging
 MAX_QUERY_CHARS = 500
 PROMPT_INJECTION_PATTERNS = [

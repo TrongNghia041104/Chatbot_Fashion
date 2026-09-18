@@ -24,9 +24,11 @@ deterministic (có thể kiểm chứng, không có hallucination).
     Layer 1 — Modality gate    : Có ảnh → _route_image_request()
     Layer 2 — Session state    : Đang chờ xác nhận → _route_pending_state()
     Layer 3 — Keyword matching : Từ khóa độ chính xác cao → route_from_keywords()
+    Layer 3b— Semantic routing : Nhúng câu, so câu mẫu → route_from_semantic()
+    Layer 3c— Category heuristic: Có category rõ → route_from_category_heuristic()
     Layer 4 — LLM fallback     : Câu mơ hồ → classify_intent_llm()
 
-Layer thấp hơn (1 < 2 < 3) luôn được ưu tiên hơn Layer 4 (LLM).
+Layer thấp hơn (1 < 2 < 3 < 3b < 3c) luôn được ưu tiên hơn Layer 4 (LLM).
 """
 
 from __future__ import annotations
@@ -50,6 +52,7 @@ from fashion_rag.config import (
     LLM_MODEL,
     MALE_KEYWORDS,
     OLLAMA_BASE_URL,
+    SEMANTIC_ROUTER_ENABLED,
     STRICT_OUT_OF_SCOPE_PATTERNS,
 )
 
@@ -91,6 +94,7 @@ from fashion_rag.domain.value_objects.enums import (  # noqa: E402
     CERTAINTY_CONTEXTUAL,
     CERTAINTY_DETERMINISTIC,
     CERTAINTY_LLM_ASSISTED,
+    CERTAINTY_SEMANTIC,
     EXECUTION_ROUTES,
     MODALITY_IMAGE,
     MODALITY_TEXT,
@@ -670,6 +674,8 @@ def certainty_from_source(source: str, *, clarification: bool = False) -> str:
     """
     if clarification:
         return CERTAINTY_CLARIFICATION_REQUIRED
+    if source == "semantic":
+        return CERTAINTY_SEMANTIC
     if source in {"llm", "fallback"}:
         return CERTAINTY_LLM_ASSISTED
     if source in CONTEXTUAL_SOURCES:
@@ -1309,11 +1315,36 @@ CONTINUABLE_ROUTES = {
 }
 
 
+def route_from_category_heuristic(query: str) -> IntentDecision | None:
+    """Layer 3c: đoán product_discovery khi câu có category thời trang rõ ràng.
+
+    Bước mờ nhất (confidence 0.85). Trong ``route_user_request`` nó chạy SAU
+    ``route_from_semantic`` để một từ trùng category (vd "quan" trong "quan
+    trọng") không lấn át ý định của cả câu.
+    """
+    entities = extract_basic_entities(query)
+    if not entities.get("categories"):
+        return None
+    action = infer_product_action(query)
+    return _decision(
+        INTENT_PRODUCT_DISCOVERY,
+        MODALITY_TEXT,
+        action,
+        query,
+        confidence=0.85,
+        source="keyword_heuristic",
+        reason="Có category thời trang rõ ràng; không cần gọi LLM router.",
+        entities=entities,
+        trace=[_trace("category_heuristic", action, query)],
+    )
+
+
 def route_from_keywords(
     query: str,
     state: dict | None = None,
     has_image: bool = False,
     image_context: dict | None = None,
+    include_category_heuristic: bool = True,
 ) -> IntentDecision | None:
     """Resolve modality, state and high-precision language without calling LLM.
 
@@ -1332,16 +1363,20 @@ def route_from_keywords(
     7. **Outfit keyword**: Các từ khóa phối đồ độ chính xác cao
     8. **Search keyword**: Các từ khóa tìm sản phẩm độ chính xác cao
     9. **Category heuristic**: Có danh mục thời trang rõ ràng (confidence thấp hơn)
-   10. **None** → gọi LLM (``classify_intent_llm()``)
+       — chỉ chạy khi ``include_category_heuristic=True``.
+   10. **None** → caller chạy layer sau (semantic / LLM)
 
     Args:
         query (str): Câu query của người dùng.
         state (dict | None): Session state hiện tại.
         has_image (bool): True nếu request đi kèm file ảnh.
         image_context (dict | None): Kết quả VLM nếu đã chạy.
+        include_category_heuristic (bool): Nếu False, bỏ qua bước đoán category mờ
+            (bước 9) và trả None để caller chạy semantic trước. ``route_user_request``
+            dùng False để hạ heuristic xuống dưới Layer 3b.
 
     Returns:
-        IntentDecision | None: Decision nếu nhận ra, None nếu phải gọi LLM.
+        IntentDecision | None: Decision nếu nhận ra, None nếu phải gọi layer sau.
     """
     state = state or {}
     if has_image:
@@ -1432,19 +1467,8 @@ def route_from_keywords(
             entities=extract_basic_entities(query),
             trace=[_trace("keyword", action, query)],
         )
-    if extract_basic_entities(query).get("categories"):
-        action = infer_product_action(query)
-        return _decision(
-            INTENT_PRODUCT_DISCOVERY,
-            MODALITY_TEXT,
-            action,
-            query,
-            confidence=0.85,
-            source="keyword_heuristic",
-            reason="Có category thời trang rõ ràng; không cần gọi LLM router.",
-            entities=extract_basic_entities(query),
-            trace=[_trace("category_heuristic", action, query)],
-        )
+    if include_category_heuristic:
+        return route_from_category_heuristic(query)
     return None
 
 
@@ -1567,7 +1591,10 @@ def coerce_intent_decision(
     trace_detail = f"action={action}"
     if llm_reported_confidence is not None:
         trace_detail += "; ignored_model_confidence=true"
-    trace = [_trace("llm_intent", intent, trace_detail)]
+    # Trace stage phản ánh đúng nguồn: semantic không phải LLM, để telemetry
+    # (decision_used_llm trong api.py) không đếm nhầm là một lần gọi LLM.
+    stage = "llm_intent" if source in {"llm", "fallback"} else f"{source}_intent"
+    trace = [_trace(stage, intent, trace_detail)]
 
     missing_slots = derive_missing_slots(
         intent,
@@ -1697,6 +1724,45 @@ def classify_intent_llm(
 classify_route_llm = classify_intent_llm
 
 
+def route_from_semantic(query: str, state: dict | None = None) -> IntentDecision | None:
+    """Layer 3b: phân loại intent bằng độ tương đồng embedding, không gọi LLM.
+
+    Chạy sau keyword (Layer 3) và trước LLM (Layer 4). Nhúng câu bằng BGE-M3
+    rồi so với câu mẫu mỗi intent (xem ``fashion_rag.core.semantic_router``).
+    Trả ``None`` khi không đủ chắc để LLM (Layer 4) xử lý câu thật sự mơ hồ.
+
+    Tái dùng ``coerce_intent_decision`` để dựng route/sanitize giống hệt path
+    LLM — semantic chỉ đóng góp phần đoán intent.
+
+    Args:
+        query (str): Câu query của người dùng (đã qua keyword mà không khớp).
+        state (dict | None): Session state để kiểm tra missing slots.
+
+    Returns:
+        IntentDecision | None: Decision nếu semantic đủ chắc, None nếu nhường LLM.
+    """
+    if not SEMANTIC_ROUTER_ENABLED:
+        return None
+    try:
+        from fashion_rag.core.semantic_router import classify_intent_semantic
+
+        result = classify_intent_semantic(query)
+    except Exception as exc:
+        print(f"[WARN] Semantic router error: {exc}")
+        return None
+    if not result:
+        return None
+    intent, score = result
+    data = {
+        "intent": intent,
+        "rewrite_query": query,
+        "reason": f"Phân loại bằng semantic routing (cosine≈{score:.3f}).",
+    }
+    if intent == INTENT_PRODUCT_DISCOVERY:
+        data["action"] = infer_product_action(query)
+    return coerce_intent_decision(data, query, source="semantic", state=state)
+
+
 def route_user_request(
     query: str,
     last_bot_msg: str = "",
@@ -1713,9 +1779,11 @@ def route_user_request(
 
     **Thứ tự thực hiện**::
 
-        1. Nếu force_image_search=True  → lock route image_product_search ngay lập tức
-        2. Gọi route_from_keywords()     → Layer 1–3 (deterministic/contextual)
-        3. Nếu Layer 1–3 không match    → gọi classify_intent_llm() (Layer 4)
+        1. Nếu force_image_search=True → lock route image_product_search ngay lập tức
+        2. route_from_keywords(include_category_heuristic=False) → Layer 1–3 (keyword chắc)
+        3. Nếu chưa match → route_from_semantic() (Layer 3b)
+        4. Nếu semantic không chắc → route_from_category_heuristic() (Layer 3c)
+        5. Nếu vẫn chưa có → classify_intent_llm() (Layer 4)
 
     **force_image_search** là cờ dành cho trường hợp API đã chạy image retrieval
     thành công và muốn đảm bảo route không bị thay đổi dù query có gì.
@@ -1751,9 +1819,16 @@ def route_user_request(
         state=state,
         has_image=has_image,
         image_context=image_context,
+        include_category_heuristic=False,
     )
     if fast_decision:
         return fast_decision
+    semantic_decision = route_from_semantic(query, state=state)
+    if semantic_decision:
+        return semantic_decision
+    heuristic_decision = route_from_category_heuristic(query)
+    if heuristic_decision:
+        return heuristic_decision
     return classify_intent_llm(query, last_bot_msg=last_bot_msg, state=state)
 
 
